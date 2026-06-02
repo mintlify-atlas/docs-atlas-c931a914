@@ -22,8 +22,8 @@ if (!saved) {
 
 The `override` flag controls what happens when the destination file already exists:
 
-- **`override = false`** — the method returns `false` immediately without writing anything. The existing destination file is left completely untouched. Use this when you want idempotent daily snapshots (one file per day at most) or when losing a previous backup would be unacceptable.
-- **`override = true`** — the destination file is overwritten with the current configuration contents. The destination path must point to a regular file (not a directory) and the process must have write permission on it.
+- **`override = false`** — if the destination file already exists, the method returns `false` immediately without writing anything. The existing destination file is left completely untouched. Use this when you want idempotent daily snapshots (one file per day at most) or when losing a previous backup would be unacceptable.
+- **`override = true`** — if the destination file exists, it is overwritten with the current configuration contents. The destination path must point to a regular file (not a directory) and the process must have write permission on it.
 
 ```java
 // Safe snapshot — never overwrites an existing file
@@ -32,6 +32,12 @@ boolean created = config.Backup(new File("snapshot.conf"), false);
 // Force-overwrite a standing backup location
 config.Backup(new File("/var/backup/latest.conf"), true);
 ```
+
+## Creating a new backup file
+
+When the destination file does not exist, `NativeIOHandler.Backup` calls `path.canWrite()` before attempting `path.createNewFile()`. On some JVMs, `canWrite()` returns `false` for a path that does not yet exist (even when the parent directory is writable), which causes `Backup` to throw an `IOException` with the message `"No permission to Write"` before the file is ever created. If you encounter this, ensure the parent directory exists and is writable. If `canWrite()` still returns `false` on your JVM for a non-existent path, pre-create the file manually before calling `Backup`.
+
+After the file is created, `Backup` writes the current serialized contents to it with `writeToFile`. The parent directory of the destination path **must** already exist — `Backup` does not create intermediate directories automatically.
 
 ## Encrypted backups
 
@@ -79,7 +85,7 @@ These backups can serve as a way to persist an in-memory config to disk on shutd
 </Tip>
 
 <Warning>
-  `NativeIOHandler.Backup` wraps any `IOException` in a `RuntimeException`. Common causes include the destination directory not existing, insufficient write permissions on the path, or the destination pointing to a directory rather than a file. Ensure the parent directory exists and is writable before calling `Backup` — JungleConfig will not create missing directories automatically.
+  `NativeIOHandler.Backup` wraps any `IOException` in a `RuntimeException`. Common causes include the destination directory not existing, insufficient write permissions on the path, `canWrite()` returning `false` for a non-existent path on certain JVMs, or the destination pointing to a directory rather than a file. Ensure the parent directory exists and is writable before calling `Backup` — JungleConfig will not create missing directories automatically.
 
   ```java
   File backupDir = new File("/backups");

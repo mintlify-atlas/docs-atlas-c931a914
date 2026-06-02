@@ -37,7 +37,7 @@ Both variants are always consistent with pending transaction state — keys queu
 
 ## Inspecting stored types
 
-Every entry in JungleConfig is stored with an explicit type tag that identifies which adapter was used to serialize it. `getTypeSimpleName(String key)` returns that tag as a `String` (for example, `"String"`, `"Integer"`, `"Boolean"`, `"Json"`). `GetTypeSimpleName(String key)` returns the same value wrapped in an `Optional<String>`.
+Every entry in JungleConfig is stored with an explicit type tag that identifies which adapter was used to serialize it. `getTypeSimpleName(String key)` returns that tag as a `String` (for example, `"String"`, `"Integer"`, `"Boolean"`, `"Json"`). `GetTypeSimpleName(String key)` returns the result wrapped in an `Optional<String>` using `Optional.of(...)`.
 
 ```java
 config.Set("timeout", 30);
@@ -49,7 +49,11 @@ String hostnameType = config.getTypeSimpleName("hostname"); // "String"
 String debugType    = config.getTypeSimpleName("debug");    // "Boolean"
 ```
 
-Calling `getTypeSimpleName` on a key that does not exist returns `null`. Use `GetTypeSimpleName` (capital G) if you prefer an `Optional` to avoid a null check.
+Calling `getTypeSimpleName` on a key that does not exist returns `null`.
+
+<Warning>
+  `GetTypeSimpleName(String key)` (capital G) is implemented as `Optional.of(getTypeSimpleName(key))`. Because `Optional.of` rejects `null`, calling `GetTypeSimpleName` for a key that does not exist throws a `NullPointerException` rather than returning `Optional.empty()`. This is a known bug in the source. Always check `Exists(key)` first, or use the lowercase `getTypeSimpleName` and guard against `null` yourself, rather than relying on `GetTypeSimpleName` for safe absent-key handling.
+</Warning>
 
 ## Advanced querying with query()
 
@@ -57,19 +61,22 @@ Calling `getTypeSimpleName` on a key that does not exist returns `null`. Use `Ge
 
 ```java
 TypeMap<String, String, String> query(
-    boolean iKey,   String keyReg,   // key must / must not match keyReg
-    boolean iType,  String typeReg,  // type tag must / must not match typeReg
-    boolean iVal,   String valReg    // raw value must / must not match valReg
+    boolean iKey,   String keyReg,   // key condition
+    boolean iType,  String typeReg,  // type tag condition
+    boolean iVal,   String valReg    // raw value condition
 )
 ```
 
-Set the `boolean` flag to `false` to require that the regex matches, or `true` to require that it does **not** match (XOR semantics). All three conditions must be satisfied for an entry to appear in the result.
+Each condition uses XOR logic: an entry satisfies a condition when `(invertFlag XOR key.matches(regex))` evaluates to `true`. All three conditions must be satisfied simultaneously for an entry to appear in the result.
 
-| `iKey` | `keyReg` | Effect |
-|---|---|---|
-| `false` | `"app\\..+"` | Includes keys that start with `app.` |
-| `true` | `"app\\..+"` | Excludes keys that start with `app.` |
-| `false` | `"Integer"` | When used as `iType/typeReg`, includes only Integer-typed entries |
+| `iKey` | `keyReg` | `iKey XOR matches(keyReg)` | Effect |
+|---|---|---|---|
+| `false` | `".+"` | `false XOR true` = **true** | All keys included |
+| `true` | `".+"` | `true XOR true` = **false** | No keys included |
+| `false` | `"app\\..+"` | `false XOR true` = **true** (only if key matches) | Includes only keys starting with `app.` |
+| `true` | `"app\\..+"` | `true XOR true` = **false** (for matching keys) | Excludes keys starting with `app.` |
+
+The same XOR logic applies independently to `iType`/`typeReg` and `iVal`/`valReg`. All three conditions must be true together.
 
 The method returns a `TypeMap<String, String, String>` where each entry holds the key, the type tag, and the raw stored value string.
 
@@ -82,9 +89,9 @@ config.Set("hostname", "localhost");
 
 // Find all Integer-typed entries
 TypeMap<String, String, String> results = config.query(
-    false, ".+",       // iKey=false:  key matches .+ (all keys)
-    false, "Integer",  // iType=false: type tag matches "Integer" exactly
-    false, ".+"        // iVal=false:  raw value matches .+ (any non-empty value)
+    false, ".+",       // iKey=false:  false XOR matches(".+") = true for all keys
+    false, "Integer",  // iType=false: false XOR matches("Integer") = true only for Integer type
+    false, ".+"        // iVal=false:  false XOR matches(".+") = true for any non-empty value
 );
 
 for (TypeMap.Entry<String, String, String> entry : results.getEntryList()) {

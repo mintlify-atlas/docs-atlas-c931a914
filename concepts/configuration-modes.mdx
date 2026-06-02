@@ -36,7 +36,7 @@ JungleConfig's storage backend is chosen at construction time through four facto
     JungleConfig config = JungleConfig.FlatJsonConfig();
     ```
 
-    Flat JSON mode replaces the line-oriented JConfig001 encoding with a Jackson-serialized JSON document stored in memory (also backed by `NativeInMemoryIOHandler`). The entire `TypeMap` is serialized as a JSON object on every write and deserialized on every read. This is useful when you want a structured, JSON-native in-process config store, or when you need to inspect the internal state with a JSON viewer during debugging.
+    Flat JSON mode uses `NativeFlatJsonConverter` with a `NativeInMemoryIOHandler` as its backing store. Instead of the line-oriented JConfig001 encoding, the entire internal `TypeMap` is serialized as a Jackson JSON document and stored in memory. Because the backing store is in-memory, no data is written to disk and all entries are lost when the process exits. This mode is useful when you need an in-process config store or want to inspect the internal state as a JSON structure during debugging.
   </Tab>
 </Tabs>
 
@@ -47,7 +47,7 @@ JungleConfig's storage backend is chosen at construction time through four facto
 | File | ✅ Yes | ❌ No | ✅ Yes | Production app config |
 | Encrypted | ✅ Yes | ✅ Yes (AES-256/GCM) | ❌ No | Secrets & credentials |
 | InMemory | ❌ No | ❌ No | N/A | Tests & ephemeral config |
-| FlatJson | ❌ No | ❌ No | ✅ Yes (JSON) | Debugging & structured in-process config |
+| FlatJson | ❌ No | ❌ No | ❌ No | Debugging & structured in-process config |
 
 <Note>
 All four modes share an identical `JungleConfig` API. Methods like `Set`, `get`, `Get`, `BeginTransaction`, `Commit`, `Rollback`, `InvalidateCache`, and `Backup` behave the same regardless of which mode is active. You can swap modes by changing a single line of construction code without touching any other part of your application.

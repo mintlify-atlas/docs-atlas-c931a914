@@ -33,13 +33,13 @@ For example:
 - `UUID.class.getSimpleName()` → `"UUID"`
 - `LocalDate.class.getSimpleName()` → `"LocalDate"`
 
-When `JungleConfig.Set(key, value)` is called without an explicit type hint, the framework calls `value.getClass().getSimpleName()` and looks for an adapter with a matching `getType()`. When `JungleConfig.Set(key, value, type)` is called with an explicit hint, the `type` argument is compared directly to `getType()`.
+When `JungleConfig.Set(key, value)` is called without an explicit type hint, the framework calls `value.getClass().getSimpleName()` and looks for an adapter with a matching `getType()`. When `JungleConfig.Set(key, value, type)` is called with an explicit hint, the `type` argument is compared directly to `getType()`. The string returned by `getType()` is also written verbatim into the configuration file as the type tag for the entry, so it must be stable across restarts.
 
 ---
 
 ### `ConvertToSave(Object object) → String`
 
-Converts the in-memory object to a plain `String` suitable for storage. The returned string is URL-encoded by the underlying `ConverterInterface` before being written to the configuration file, so you do not need to escape special characters yourself — return the natural string representation of the value.
+Converts the in-memory object to a plain `String` suitable for storage. The `object` parameter is the already-resolved Java value passed to `JungleConfig.Set` after the adapter has been selected — it is not raw user input. The returned string is URL-encoded by the underlying `ConverterInterface` before being written to the configuration file, so you do not need to escape special characters yourself — return the natural string representation of the value.
 
 <ParamField path="object" type="Object" required>
   The value to serialize. Guaranteed to be an instance of the type this adapter handles when called through the normal `JungleConfig.Set` path.
@@ -65,15 +65,23 @@ Converts the stored string back to the target Java type. The string passed here 
 
 ## Registration
 
-Custom adapters are registered by passing them as varargs to `NativeTypeConverter`'s constructor:
+Custom adapters are registered by passing them as varargs to `NativeTypeConverter`'s constructor. The `getDefaultAdapters()` method in `JungleConfig` is `private`, so there is no programmatic way to retrieve the built-in adapter list to extend it. When supplying a custom `NativeTypeConverter`, you must include every adapter you need — both your custom ones and any built-in types you still want to support.
 
 ```java
 NativeTypeConverter converter = new NativeTypeConverter(
     cacheInterface,
     true,                    // fallback to Jackson if no adapter matches
-    new BigDecimalAdapter(),
     new NativeBooleanAdapter(),
-    // ... other adapters
+    new NativeIntagerAdapter(),
+    new NativeStringAdapter(),
+    new NativeLongAdapter(),
+    new NativeDoubleAdapter(),
+    new NativeFloatAdapter(),
+    new NativeUUIDAdapter(),
+    new NativeLocalDateAdapter(),
+    new NativeLocalDateTimeAdapter(),
+    new NativeLocalTimeAdapter(),
+    new BigDecimalAdapter()  // your custom adapter
 );
 JungleConfig config = new JungleConfig(converter);
 ```

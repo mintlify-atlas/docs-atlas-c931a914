@@ -1,7 +1,7 @@
 ---
-title: "Install JungleConfig in Your Java Project"
+title: "Install JungleConfig in Your Maven or Gradle Project"
 sidebarTitle: "Installation"
-description: "Add JungleConfig and its Jackson dependencies to Maven or Gradle. Covers Java version requirements and building from source."
+description: "Add JungleConfig and its required Jackson dependencies to Maven or Gradle. Covers Java version requirements and how to build from source."
 ---
 
 JungleConfig is distributed as a standard JAR and declared through the usual Maven or Gradle dependency mechanisms. This page covers everything you need to add it to a new or existing project, whether you pull it from a local Maven repository after building from source or declare it directly in your build file.
@@ -10,7 +10,7 @@ JungleConfig is distributed as a standard JAR and declared through the usual Mav
 
 Before adding JungleConfig, confirm your environment meets these prerequisites:
 
-- **Java 17 or later.** The library is compiled with `--release 19` but is compatible with any JDK 17+ runtime. Older JDKs are not supported because the library uses records and sealed types introduced in that era.
+- **Java 19 or later.** The library is compiled with `maven.compiler.source` and `maven.compiler.target` both set to `19`, so a JDK 19+ installation is required. Older JDKs are not supported.
 - **Maven 3.6+ or Gradle 7+.** Either build tool works; the dependency coordinates are the same.
 - **Jackson modules.** JungleConfig relies on three Jackson modules for POJO serialisation and Java Time support. They are listed as direct dependencies below. If your project already pulls in a compatible Jackson version transitively, you can omit the explicit declarations — but it is safer to pin them.
 

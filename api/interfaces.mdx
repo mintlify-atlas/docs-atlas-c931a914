@@ -4,22 +4,22 @@ sidebarTitle: "Interfaces"
 description: "Reference for the core interfaces that form JungleConfig's layered architecture: TypeConverter, CacheInterface, ConverterInterface, IOHandlerInterface, and TypeMap."
 ---
 
-JungleConfig is built on a strictly layered architecture where each layer communicates only with the interface immediately below it. This design allows any layer to be swapped out independently — for example, replacing the IO layer with an encrypted implementation without touching the caching or type-conversion logic. The layers are assembled bottom-up:
+JungleConfig is built on a strictly layered architecture where each layer communicates only with the interface immediately below it. This design allows any layer to be swapped out independently — for example, replacing the IO layer with an encrypted implementation without touching the caching or type-conversion logic. The layers are assembled from outermost (public API) to innermost (raw I/O):
 
 ```
-IOHandlerInterface
-    ↓
-ConverterInterface
-    ↓
-InternalCacheInterface
-    ↓
-InternalServiceInterface
-    ↓
-CacheInterface
-    ↓
-TypeConverter
-    ↓
 JungleConfig  (public API)
+    ↓
+TypeConverter          ← NativeTypeConverter
+    ↓
+CacheInterface         ← NativeExtendedCache
+    ↓
+InternalServiceInterface  ← NativeInternalTransaction
+    ↓
+InternalCacheInterface    ← NativeInternalCache
+    ↓
+ConverterInterface     ← NativeConverter / NativeEncryptedConverter / NativeFlatJsonConverter
+    ↓
+IOHandlerInterface     ← NativeIOHandler / NativeInMemoryIOHandler
 ```
 
 The sections below document each interface, its purpose, and the methods it declares.
@@ -111,6 +111,61 @@ At this layer, values are already serialized to strings by `NativeTypeConverter`
 
 ---
 
+## InternalServiceInterface
+
+**Package:** `com.codehack.JungleConfig.Core`
+
+`InternalServiceInterface` wraps `InternalCacheInterface` and adds transaction support (begin, end, commit, rollback) as well as the full suite of single-entry read/write/remove/query operations. The default implementation is `NativeInternalTransaction`, which buffers writes in a transaction log and applies them atomically on commit.
+
+```java
+public interface InternalServiceInterface {
+    void BeginTransaction();
+    void EndTransaction();
+    void Rollback();
+    void Commit();
+
+    TypeMap.Entry<String, String, String> Get(String key);
+    void Set(TypeMap.Entry<String, String, String> data);
+    boolean Remove(String key);
+    void InvalidateCache();
+
+    TypeMap<String, String, String> query(
+        boolean iKey, String keyReg,
+        boolean iType, String typeReg,
+        boolean iVal, String valReg);
+
+    void RemoveAll();
+    boolean Exists(String key);
+    List<String> getAllKeys();
+    List<String> getAllKeys(String regx);
+    String getTypeSimpleName(String key);
+    boolean Backup(File file, boolean override);
+}
+```
+
+Implement this interface to replace the transaction strategy — for example, to add two-phase commit semantics or integrate with an external transaction coordinator — while reusing all other layers unchanged.
+
+---
+
+## InternalCacheInterface
+
+**Package:** `com.codehack.JungleConfig.Core`
+
+`InternalCacheInterface` is an implementation-detail interface that sits between `ConverterInterface` and `InternalServiceInterface`. It defines how pending writes and removals are batched before being flushed to the converter layer. The default implementation is `NativeInternalCache`, which accepts write and read margin thresholds that control how frequently the cache is flushed to disk.
+
+```java
+public interface InternalCacheInterface {
+    void Set(TypeMap<String, String, String> saveQuery, List<String> remList);
+    TypeMap<String, String, String> Get(TypeMap<String, String, String> saveQuery, List<String> remList);
+    void Invalidate();
+    boolean Backup(File file, boolean override);
+}
+```
+
+Developers extending JungleConfig can implement `InternalCacheInterface` to swap out the write-batching and read-margin strategy without touching any other layer.
+
+---
+
 ## ConverterInterface
 
 **Package:** `com.codehack.JungleConfig.Core`
@@ -198,12 +253,14 @@ public class TypeMap<T, D, S> {
     public List<Entry<T, D, S>> getEntriesOfv1(D v1);
     public List<Entry<T, D, S>> getEntriesOfv2(S v2);
 
+    public Integer indexOf(T key);
+
     public static <T, D, S> TypeMap<T, D, S> of();
 
     public static class Entry<T, D, S> {
         public T getKey();
-        public D getValue1();
-        public S getValue2();
+        public D getValue1();   // type tag in JungleConfig context
+        public S getValue2();   // encoded value in JungleConfig context
         public void setKey(T key);
         public void setValue1(D value1);
         public void setValue2(S value2);
@@ -223,6 +280,11 @@ public class TypeMap<T, D, S> {
 | `getEntryList()` | Returns the full ordered list of all entries. |
 | `getKeyList()` | Returns an ordered list of all keys. |
 | `clear()` | Removes all entries. |
+| `indexOf(key)` | Returns the index of the entry with the given key in the internal list. |
+
+<Note>
+  `TypeMap` equality is key-only: two `Entry` objects are considered equal if their keys are equal, regardless of `getValue1()` or `getValue2()`. This means `put(key, v1, v2)` on an existing key updates the entry in place rather than adding a duplicate.
+</Note>
 
 ### Usage: Iterating Query Results
 
@@ -235,63 +297,8 @@ TypeMap<String, String, String> result =
 for (TypeMap.Entry<String, String, String> entry : result.getEntryList()) {
     System.out.printf("Key: %s, Type: %s, Value: %s%n",
         entry.getKey(),    // e.g. "db.host"
-        entry.getValue1(), // e.g. "String"
-        entry.getValue2()  // e.g. "localhost"
+        entry.getValue1(), // e.g. "String"  (type tag)
+        entry.getValue2()  // e.g. "localhost" (encoded value)
     );
 }
 ```
-
----
-
-## InternalCacheInterface
-
-**Package:** `com.codehack.JungleConfig.Core`
-
-`InternalCacheInterface` is an implementation-detail interface that sits between `ConverterInterface` and `InternalServiceInterface`. It defines how pending writes and removals are batched before being flushed to the converter layer. The default implementation is `NativeInternalCache`, which accepts write and read margin thresholds that control how frequently the cache is flushed to disk.
-
-```java
-public interface InternalCacheInterface {
-    void Set(TypeMap<String, String, String> saveQuery, List<String> remList);
-    TypeMap<String, String, String> Get(TypeMap<String, String, String> saveQuery, List<String> remList);
-    void Invalidate();
-    boolean Backup(File file, boolean override);
-}
-```
-
-Developers extending JungleConfig can implement `InternalCacheInterface` to swap out the write-batching and read-margin strategy without touching any other layer.
-
----
-
-## InternalServiceInterface
-
-**Package:** `com.codehack.JungleConfig.Core`
-
-`InternalServiceInterface` wraps `InternalCacheInterface` and adds transaction support (begin, end, commit, rollback) as well as the full suite of single-entry read/write/remove/query operations. The default implementation is `NativeInternalTransaction`, which buffers writes in a transaction log and applies them atomically on commit.
-
-```java
-public interface InternalServiceInterface {
-    void BeginTransaction();
-    void EndTransaction();
-    void Rollback();
-    void Commit();
-
-    TypeMap.Entry<String, String, String> Get(String key);
-    void Set(TypeMap.Entry<String, String, String> data);
-    boolean Remove(String key);
-    void InvalidateCache();
-
-    TypeMap<String, String, String> query(
-        boolean iKey, String keyReg,
-        boolean iType, String typeReg,
-        boolean iVal, String valReg);
-
-    void RemoveAll();
-    boolean Exists(String key);
-    List<String> getAllKeys();
-    List<String> getAllKeys(String regx);
-    String getTypeSimpleName(String key);
-    boolean Backup(File file, boolean override);
-}
-```
-
-Implement this interface to replace the transaction strategy — for example, to add two-phase commit semantics or integrate with an external transaction coordinator — while reusing all other layers unchanged.

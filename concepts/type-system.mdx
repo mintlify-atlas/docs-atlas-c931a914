@@ -11,7 +11,7 @@ JungleConfig resolves how to serialize and deserialize each value through a thre
 JungleConfig ships with ten built-in adapters registered automatically by `JungleConfig.getDefaultAdapters()`. Each adapter implements the `TypeConverterAdapter` interface, which declares three methods: `getType()` returns the simple class name used as the type tag in the config file, `ConvertToSave(Object)` converts a value to its string representation, and `CastToUse(String)` parses that string back to the correct Java type.
 
 | Type tag | Java class | `getType()` return |
-|----------|------------|--------------------|
+|----------|------------|-------------------|
 | `Boolean` | `java.lang.Boolean` | `"Boolean"` |
 | `Integer` | `java.lang.Integer` | `"Integer"` |
 | `String` | `java.lang.String` | `"String"` |
@@ -73,18 +73,20 @@ Both `get` and `getCollection` have `Optional`-returning counterparts — `Get` 
 
 ## Type Resolution Order
 
-`NativeTypeConverter` determines how to serialize a value through the following steps, in order:
+`NativeTypeConverter.ConvertToSave()` determines how to serialize a value through the following steps, in order:
 
-1. **Explicit type hint** — if you call `Set(key, data, type)` with a non-blank type string, that type string is used directly. Passing `"Json"` forces Jackson serialization regardless of whether a built-in adapter exists for the class.
-2. **Class simple name lookup** — if no explicit type is provided, the type string is derived from `dataObj.getClass().getSimpleName()` and looked up in the adapter registry.
-3. **Jackson fallback** — if the class simple name is not in the registry and `FALLBACK_TO_SERIALIZE` is `true`, Jackson serializes the object to JSON and the type tag is set to `"Json"`.
-4. **Exception** — if the class is not in the registry and `FALLBACK_TO_SERIALIZE` is `false`, an `InvalidConfigFormatException` is thrown.
+1. **Null check** — if the data object is `null`, the type tag is immediately set to `"null"` and the value string is `"null"`. No further steps are evaluated.
+2. **`"Json"` explicit hint** — if `Set(key, data, type)` is called with `type` equal to `"Json"`, Jackson serializes the object immediately, regardless of whether a built-in adapter exists for the class. The type tag stored is `"Json"`.
+3. **Class simple name derivation** — if the type string passed to `Set(key, data, type)` is blank (or `Set(key, data)` is called without a type), the type string is derived from `dataObj.getClass().getSimpleName()` and the process continues to step 4.
+4. **Adapter registry lookup** — the type string (from step 2 or derived in step 3) is looked up in the adapter registry. If a matching `TypeConverterAdapter` is found, its `ConvertToSave(Object)` method handles serialization.
+5. **Jackson fallback** — if the type is not in the registry and `FALLBACK_TO_SERIALIZE` is `true` (the default), Jackson serializes the object to JSON and the type tag is set to `"Json"`.
+6. **Exception** — if the type is not in the registry and `FALLBACK_TO_SERIALIZE` is `false`, an `InvalidConfigFormatException` is thrown.
 
 On read, the stored type tag drives deserialization: if the tag is `Json` or the requested class is not in the adapter registry, Jackson's `ConvertToObject` is called; otherwise the matching `TypeConverterAdapter.CastToUse` handles it.
 
 ## Null Values
 
-Setting a key to `null` is fully supported. Internally, `NativeTypeConverter` detects a `null` data object before consulting the adapter registry and records the type tag as `"null"` with the value string `"null"`:
+Setting a key to `null` is fully supported. `NativeTypeConverter` detects a `null` data object before any other step and records the type tag as `"null"` with the value string `"null"`:
 
 ```java
 config.Set("optional.feature", null);

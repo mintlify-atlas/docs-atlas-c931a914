@@ -8,6 +8,10 @@ JungleConfig ships with ten built-in `TypeConverterAdapter` implementations that
 
 Each adapter converts its target type to a plain string via `ConvertToSave` before the string is URL-encoded and written to the backing store. On read, the stored string is URL-decoded and passed to `CastToUse`, which reconstructs the original value.
 
+<Note>
+  `NativeFlatJsonConverter` is a `ConverterInterface` implementation (not a `TypeConverterAdapter`) and is therefore not listed here. It handles the file-level encoding format and operates at a different layer of the stack.
+</Note>
+
 ---
 
 ## Adapter Reference Table
@@ -18,8 +22,8 @@ Each adapter converts its target type to a plain string via `ConvertToSave` befo
 | `NativeIntagerAdapter` | `"Integer"` | `java.lang.Integer` | Decimal string, e.g. `"42"` |
 | `NativeStringAdapter` | `"String"` | `java.lang.String` | Raw string (URL-encoded on disk) |
 | `NativeLongAdapter` | `"Long"` | `java.lang.Long` | Decimal string, e.g. `"9223372036854775807"` |
-| `NativeDoubleAdapter` | `"Double"` | `java.lang.Double` | `Double.toString()`, e.g. `"3.14159"` |
-| `NativeFloatAdapter` | `"Float"` | `java.lang.Float` | `Float.toString()`, e.g. `"1.23"` |
+| `NativeDoubleAdapter` | `"Double"` | `java.lang.Double` | `toString()` output, e.g. `"3.14159"` or `"1.0E-4"` for extreme values |
+| `NativeFloatAdapter` | `"Float"` | `java.lang.Float` | `toString()` output, e.g. `"1.23"` |
 | `NativeUUIDAdapter` | `"UUID"` | `java.util.UUID` | Standard UUID string, e.g. `"550e8400-e29b-41d4-a716-446655440000"` |
 | `NativeLocalDateAdapter` | `"LocalDate"` | `java.time.LocalDate` | ISO-8601 date, e.g. `"2024-02-29"` |
 | `NativeLocalDateTimeAdapter` | `"LocalDateTime"` | `java.time.LocalDateTime` | ISO-8601 datetime, e.g. `"2024-02-29T12:34:56"` |
@@ -55,7 +59,7 @@ Integer port = config.get("server.port", Integer.class); // 8080
 
 ### NativeStringAdapter
 
-Handles `java.lang.String`. `ConvertToSave` calls `toString()` and returns the string as-is; the `ConverterInterface` layer applies URL-encoding before writing to disk, so strings containing `=`, `&`, `\n`, and similar characters are stored safely.
+Handles `java.lang.String`. `ConvertToSave` returns the string as-is; the `ConverterInterface` layer applies URL-encoding before writing to disk, so strings containing `=`, `&`, `\n`, and similar characters are stored safely.
 
 ```java
 config.Set("app.name", "My App");
@@ -77,7 +81,7 @@ Long maxBytes = config.get("cache.maxBytes", Long.class);
 
 ### NativeDoubleAdapter
 
-Handles `java.lang.Double` via `toString()` / `Double.valueOf()`. The storage format is the output of `Double.toString()`, which uses scientific notation for very large or very small values (e.g. `"1.0E-4"`).
+Handles `java.lang.Double` via `toString()` / `Double.valueOf()`. The storage format is the output of `Double.toString()`, which uses standard decimal notation for most values but switches to scientific notation for very large or very small values (e.g. `"1.0E-4"`).
 
 ```java
 config.Set("pi", 3.141592653589793);
@@ -110,7 +114,7 @@ UUID sessionId = config.get("session.id", UUID.class);
 
 ### NativeLocalDateAdapter
 
-Handles `java.time.LocalDate` via `toString()` / `LocalDate.parse()`. Values are stored in ISO-8601 date format (`yyyy-MM-dd`).
+Handles `java.time.LocalDate` via `toString()` on write and `LocalDate.parse(data)` on read. Values are stored in ISO-8601 date format (`yyyy-MM-dd`).
 
 ```java
 config.Set("subscription.expiry", LocalDate.of(2025, 12, 31));
@@ -121,7 +125,7 @@ LocalDate expiry = config.get("subscription.expiry", LocalDate.class);
 
 ### NativeLocalDateTimeAdapter
 
-Handles `java.time.LocalDateTime` via `toString()` / `LocalDateTime.parse()`. Values are stored as ISO-8601 local date-time strings (e.g. `"2024-02-29T12:34:56"`).
+Handles `java.time.LocalDateTime` via `toString()` on write and `LocalDateTime.parse(data)` on read. Values are stored as ISO-8601 local date-time strings (e.g. `"2024-02-29T12:34:56"`).
 
 ```java
 config.Set("job.lastRun", LocalDateTime.now());
@@ -132,7 +136,7 @@ LocalDateTime lastRun = config.get("job.lastRun", LocalDateTime.class);
 
 ### NativeLocalTimeAdapter
 
-Handles `java.time.LocalTime` via `toString()` / `LocalTime.parse()`. Values are stored as ISO-8601 time strings (e.g. `"12:34:56"`).
+Handles `java.time.LocalTime` via `toString()` on write and `LocalTime.parse(data)` on read. Values are stored as ISO-8601 time strings (e.g. `"12:34:56"`).
 
 ```java
 config.Set("schedule.startTime", LocalTime.of(9, 0));
@@ -182,7 +186,7 @@ LocalTime startTime = config.get("startTime", LocalTime.class);
 ---
 
 <Note>
-  `NativeIntagerAdapter` contains a deliberate typo in its class name — "Intager" instead of "Integer" — inherited from the original source code. The class name is `NativeIntagerAdapter` and this is the actual identifier you will see in stack traces, imports, and reflection output. However, `getType()` correctly returns `Integer.class.getSimpleName()`, which equals `"Integer"`, so there is no functional impact: `config.Set("count", 42)` and `config.get("count", Integer.class)` both work exactly as expected.
+  `NativeIntagerAdapter` contains a typo in its class name — "Intager" instead of "Integer" — inherited from the original source code. The class name is `NativeIntagerAdapter` and this is the actual identifier you will see in stack traces, imports, and reflection output. However, `getType()` correctly returns `Integer.class.getSimpleName()`, which equals `"Integer"`, so there is no functional impact: `config.Set("count", 42)` and `config.get("count", Integer.class)` both work exactly as expected.
 </Note>
 
 <Tip>

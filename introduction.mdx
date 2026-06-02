@@ -1,7 +1,7 @@
 ---
 title: "JungleConfig: Lightweight Type-Safe Config for Java"
 sidebarTitle: "Introduction"
-description: "JungleConfig stores typed key-value configuration in a compact file format. Learn what it does, how it works, and when to use it."
+description: "JungleConfig stores typed key-value configuration in a compact file format. Learn what it does, how it works, and when to use it effectively."
 ---
 
 JungleConfig is a lightweight, type-safe configuration library for Java that stores key-value pairs — along with their runtime types — in a compact, human-readable file format called JConfig001. Unlike property files or plain JSON configs, every value carries an explicit type tag, so reading a key back always returns the exact Java type you stored, with no manual parsing or casting required. JungleConfig ships with built-in support for primitives, UUIDs, Java Time types, POJOs, and collections, and its layered architecture makes every layer — I/O, caching, encryption, and type conversion — independently swappable.
@@ -70,5 +70,5 @@ The `JungleConfig` constructor wires these layers in order, so you always intera
 JungleConfig is a good fit when you need a self-contained configuration store for a Java application — a CLI tool, a desktop app, a daemon, or a microservice — and you want the configuration to be readable and editable by humans without losing the type information that your code relies on. It is especially useful when you need to persist structured objects (POJOs or collections) without standing up a database, or when sensitive configuration values must be stored encrypted on disk without pulling in a heavyweight secrets manager.
 
 <Note>
-  JungleConfig requires **Java 17 or later**. Its only external runtime dependency is the Jackson suite: `jackson-databind`, `jackson-datatype-jdk8`, and `jackson-datatype-jsr310`. No other third-party libraries are required.
+  JungleConfig requires **Java 19 or later**. Its only external runtime dependency is the Jackson suite: `jackson-databind`, `jackson-datatype-jdk8`, and `jackson-datatype-jsr310`. No other third-party libraries are required.
 </Note>

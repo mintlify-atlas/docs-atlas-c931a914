@@ -23,12 +23,14 @@ String name = config.get("app.name", String.class); // "MyService"
 
 Calling `BeginTransaction()` switches the instance into manual mode — auto-commit is disabled and all subsequent `Set`, `Remove`, and `RemoveAllKeys` calls are queued in memory rather than written through immediately.
 
-| Method | What it does |
-|---|---|
-| `BeginTransaction()` | Disables auto-commit; starts buffering operations |
-| `Commit()` | Flushes the current buffer to the backing store; transaction stays open |
-| `Rollback()` | Discards the buffer; nothing is written |
-| `EndTransaction()` | Re-enables auto-commit and immediately flushes any remaining pending saves |
+| Method | Return type | What it does |
+|---|---|---|
+| `BeginTransaction()` | `JungleConfig` | Disables auto-commit; starts buffering operations |
+| `Commit()` | `JungleConfig` | Flushes the current buffer to the backing store; transaction stays open |
+| `Rollback()` | `JungleConfig` | Discards the buffer; nothing is written |
+| `EndTransaction()` | `void` | Re-enables auto-commit and immediately flushes any remaining pending saves |
+
+All four methods are chainable except `EndTransaction()`, which returns `void`.
 
 ```java
 JungleConfig config = JungleConfig.InMemoryConfig();
@@ -44,7 +46,7 @@ String name = config.get("user.name", String.class); // "Alice"
 
 ## Rollback example
 
-If something goes wrong before you commit, call `Rollback()` to throw away every queued operation. None of the pending writes ever reach the backing store.
+If something goes wrong before you commit, call `Rollback()` to throw away every queued operation. Only the in-memory buffer (`saveQuery` and `remList`) is cleared — nothing is written to or removed from the backing store. Any writes that were already flushed by an earlier `Commit()` call within the same transaction are **not** reversed; `Rollback()` can only discard what has not yet been committed.
 
 ```java
 config.BeginTransaction();
@@ -56,9 +58,9 @@ boolean exists = config.Exists("feature.flag"); // false
 
 ## BeginTransaction vs EndTransaction
 
-`EndTransaction()` does two things at once: it re-enables auto-commit **and** immediately flushes any saves that are still pending in the buffer. Use it when you want to close out the transaction and return to normal auto-commit behaviour in one step.
+`EndTransaction()` does two things at once: it re-enables auto-commit **and** immediately flushes any saves that are still pending in the buffer. Internally, it sets `AutoCommit = true` and then calls `send()`, which calls `flush()` because `AutoCommit` is now `true`. Use it when you want to close out the transaction and return to normal auto-commit behaviour in one step.
 
-`Commit()`, by contrast, only flushes the current buffer — the transaction remains open and auto-commit stays off. You can call `Commit()` multiple times within a single transaction to checkpoint intermediate batches without ending the transaction:
+`Commit()`, by contrast, only flushes the current buffer — the transaction remains open and auto-commit stays off (`AutoCommit` remains `false`). You can call `Commit()` multiple times within a single transaction to checkpoint intermediate batches without ending the transaction:
 
 ```java
 config.BeginTransaction();
@@ -66,7 +68,7 @@ config.BeginTransaction();
 // First batch
 config.Set("batch.a", "1");
 config.Set("batch.b", "2");
-config.Commit(); // flush batch 1 — transaction still active
+config.Commit(); // flush batch 1 — transaction still active, AutoCommit still false
 
 // Second batch
 config.Set("batch.c", "3");
@@ -76,7 +78,7 @@ config.EndTransaction(); // re-enable auto-commit and flush anything left
 ```
 
 <Note>
-  Pending transaction state is held in `NativeInternalTransaction.saveQuery` (entries to write) and `remList` (keys to delete). Calling `Rollback()` clears both lists in-place without touching the underlying file or cache, so the on-disk state remains unchanged.
+  Pending transaction state is held in `NativeInternalTransaction.saveQuery` (entries to write) and `remList` (keys to delete). Calling `Rollback()` clears both lists in-place without touching the underlying file or cache, so the on-disk state remains unchanged. Importantly, `Rollback()` only undoes writes that have not yet been committed — any batches already flushed by a previous `Commit()` call within the same transaction are permanent and cannot be rolled back.
 </Note>
 
 <Warning>

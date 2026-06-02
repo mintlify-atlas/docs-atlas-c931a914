@@ -14,7 +14,7 @@ A JConfig001 file begins with the magic header `JConfig001` on its own line. Eac
 key:TypeName=URLencodedValue
 ```
 
-The parser locates the first `:` to split the key from the type tag, and the first `=` after that to split the type tag from the encoded value. This means keys cannot contain `:` or `=`, but values may contain them freely once URL-decoded.
+The parser locates the first `:` in the line to split the key from the type tag, then locates the first `=` in the line to split the type tag from the encoded value. Because keys are validated to never contain `:` or `=`, these two positions unambiguously delimit all three fields. Values may contain `:` and `=` freely once URL-decoded — the URL encoding on disk ensures they never interfere with parsing.
 
 A realistic config file looks like this:
 
@@ -27,13 +27,13 @@ app.pi:Double=3.14159
 app.uuid:UUID=550e8400-e29b-41d4-a716-446655440000
 ```
 
-The `NativeConverter.decode()` method reads this file, splits each line by `:` and `=`, and URL-decodes the value segment. The `NativeConverter.encode()` method reconstructs the file from the in-memory `TypeMap`, writing the magic header first and then one line per entry.
+The `NativeConverter.decode()` method reads this file, strips the `JConfig001` header line, splits each remaining non-blank line by the first `:` and first `=`, and URL-decodes the value segment. The `NativeConverter.encode()` method reconstructs the file from the in-memory `TypeMap`, writing the magic header first and then one line per entry.
 
 ## Encoding
 
 Values are encoded with `java.net.URLEncoder` (using `StandardCharsets.UTF_8`) before being written to disk, and decoded with `java.net.URLDecoder` on read. Under standard URL encoding, space characters become `+` and special characters such as `&`, `=`, `#`, and non-ASCII bytes become `%XX` percent-escape sequences.
 
-This means any string value is safe to store — including multi-line JSON, ISO-formatted timestamps, binary-safe Base64 strings, and values that happen to contain `=` signs. For example, a POJO serialized to JSON such as `{"id":1,"name":"Alice"}` is stored as:
+This means any string value is safe to store — including multi-line JSON, ISO-formatted timestamps, Base64 strings, and values that happen to contain `=` signs. For example, a POJO serialized to JSON such as `{"id":1,"name":"Alice"}` is stored as:
 
 ```
 user:Json=%7B%22id%22%3A1%2C%22name%22%3A%22Alice%22%7D

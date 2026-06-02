@@ -4,21 +4,21 @@ sidebarTitle: "Caching"
 description: "JungleConfig's NativeInternalCache reduces file I/O by batching reads and writes. Learn how the flush thresholds work and how to invalidate the cache."
 ---
 
-JungleConfig sits a read/write cache between your application and the file system to minimize the number of expensive disk operations. Rather than decoding the config file on every `get` call and re-encoding it on every `Set` call, the cache keeps an in-memory copy of the entire `TypeMap` and only flushes to or from disk when specific thresholds are crossed.
+JungleConfig sits a read/write cache between your application and the file system to minimize the number of expensive disk operations. Rather than decoding the config file on every `get` call and re-encoding it on every `Set` call, the cache keeps an in-memory copy of the entire `TypeMap` and only reloads from disk when specific thresholds are crossed.
 
 ## How the Cache Works
 
 The cache is implemented by `NativeInternalCache`, which wraps the lower-level `ConverterInterface` (i.e., `NativeConverter`, `NativeEncryptedConverter`, or `NativeFlatJsonConverter`). It holds two internal counters — `currentReads` and `currentWrites` — and a dirty flag called `isDirty`.
 
-Before every read operation, `NativeInternalCache.getCache()` evaluates three conditions:
+On every read operation, `NativeInternalCache.getCache()` first evaluates three conditions:
 
 | Condition | Effect |
 |-----------|--------|
-| `isDirty == true` | Immediately re-reads the file and resets the counters and dirty flag |
-| `currentReads > MAX_READS_MARGE` | Re-reads the file (default threshold: **100** reads) |
-| `currentWrites > MAX_WRITES_MARGE` | Re-reads the file (default threshold: **10** writes) |
+| `isDirty == true` | Immediately re-reads the backing store and resets both counters and the dirty flag |
+| `currentReads > MAX_READS_MARGE` | Re-reads the backing store (default threshold: **100** reads) |
+| `currentWrites > MAX_WRITES_MARGE` | Re-reads the backing store (default threshold: **10** writes) |
 
-If none of these conditions are met, the cached `TypeMap` is returned as-is and `currentReads` is incremented. When a condition fires, the cache calls `converter.decode()` to reload the file, resets both counters to zero, and clears the dirty flag.
+If any of these conditions fires, the cache calls `converter.decode()` to reload the data, resets both `currentReads` and `currentWrites` to zero, and clears the dirty flag. After the flush check (whether or not a reload happened), `currentReads` is incremented. This means `currentReads` grows on every call to `getCache()`, not only when the cache is served from memory.
 
 The default thresholds — `MAX_WRITES_MARGE = 10` and `MAX_READS_MARGE = 100` — are hard-wired in all four `JungleConfig` factory constructors:
 
@@ -26,11 +26,11 @@ The default thresholds — `MAX_WRITES_MARGE = 10` and `MAX_READS_MARGE = 100` �
 new NativeInternalCache(converter, /* MAX_WRITES_MARGE */ 10, /* MAX_READS_MARGE */ 100, /* useCache */ true)
 ```
 
-This means the file is re-read at most once every 100 reads or once every 10 writes, whichever comes first — reducing file I/O dramatically in read-heavy workloads.
+This means the backing store is re-read at most once every 100 reads or once every 10 writes, whichever threshold is crossed first — reducing file I/O dramatically in read-heavy workloads.
 
 ## Invalidating the Cache
 
-If another process or thread modifies the underlying config file, the in-memory cache will be stale until one of the automatic thresholds fires. You can force an immediate reload by calling `InvalidateCache()`:
+If another process or thread modifies the underlying config file, the in-memory cache will be stale until one of the automatic thresholds fires. You can force an immediate reload on the next access by calling `InvalidateCache()`:
 
 ```java
 JungleConfig config = new JungleConfig(new File("app.conf"));
@@ -59,5 +59,5 @@ config.Commit(); // all three changes written atomically; cache updated
 Calling `Rollback()` inside a transaction discards all buffered changes without touching the cache or the file.
 
 <Note>
-The in-memory mode (`JungleConfig.InMemoryConfig()`) and flat JSON mode (`JungleConfig.FlatJsonConfig()`) both use the same `NativeInternalCache` wrapper with the same thresholds, but their backing store is a `NativeInMemoryIOHandler` rather than a real file. Re-reading from the in-memory handler is effectively a no-op copy of an in-process string, so the cache threshold logic still runs but the I/O cost is negligible. `InvalidateCache()` is safe to call in these modes — it simply forces a copy of the in-memory string rather than a disk read.
+The in-memory mode (`JungleConfig.InMemoryConfig()`) and flat JSON mode (`JungleConfig.FlatJsonConfig()`) both use the same `NativeInternalCache` wrapper with the same default thresholds (`MAX_WRITES_MARGE = 10`, `MAX_READS_MARGE = 100`), but their backing store is a `NativeInMemoryIOHandler` rather than a real file. Re-reading from the in-memory handler is effectively a no-op copy of an in-process string, so the cache threshold logic still runs but the I/O cost is negligible. `InvalidateCache()` is safe to call in these modes — it simply forces a re-copy of the in-memory string on the next access rather than a disk read.
 </Note>

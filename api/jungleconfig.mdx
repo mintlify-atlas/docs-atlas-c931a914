@@ -194,6 +194,7 @@ port.ifPresent(p -> System.out.println("Port: " + p));
 Reads a value into a generic collection type such as `List<String>` or `Map<String, Integer>`. Because Java erases generic type parameters at runtime, `Class<T>` is insufficient for these cases; pass a Jackson `TypeReference` instead. Returns `null` if the key does not exist.
 
 ```java
+// import com.fasterxml.jackson.core.type.TypeReference;
 List<String> tags = config.getCollection("app.tags", new TypeReference<List<String>>() {});
 ```
 
@@ -212,6 +213,7 @@ List<String> tags = config.getCollection("app.tags", new TypeReference<List<Stri
 Optional-returning variant of `getCollection`. Returns `Optional.empty()` when the key does not exist.
 
 ```java
+// import com.fasterxml.jackson.core.type.TypeReference;
 Optional<List<String>> tags = config.GetCollection("app.tags", new TypeReference<List<String>>() {});
 ```
 
@@ -254,9 +256,13 @@ Discards all pending writes accumulated since the last `BeginTransaction()` or `
 
 ---
 
-### `EndTransaction()`
+### `EndTransaction() → void`
 
-Flushes any remaining pending writes and re-enables auto-commit. After this call, every `Set` or `Remove` is immediately persisted.
+Re-enables auto-commit and immediately flushes any pending writes that were buffered since the last explicit `Commit()` or `Rollback()`. After this call, every `Set` or `Remove` is immediately persisted. This method returns `void` and cannot be chained.
+
+<Warning>
+  Call `Commit()` or `Rollback()` before `EndTransaction()` if you need explicit control over whether pending writes are applied or discarded. When `EndTransaction()` is called directly, any unflushed buffered writes are committed to the store automatically.
+</Warning>
 
 ---
 
@@ -272,7 +278,7 @@ Removes the entry with the given key. Returns `true` if the key existed and was 
 
 ---
 
-### `RemoveAllKeys()`
+### `RemoveAllKeys() → void`
 
 Clears every entry in the configuration store. Equivalent to calling `Remove` on every key returned by `getAllKeys()`, but implemented as a single atomic clear operation at the cache layer.
 
@@ -320,17 +326,21 @@ Returns the type tag stored alongside the value for the given key (e.g. `"String
 
 ### `GetTypeSimpleName(String key) → Optional<String>`
 
-Optional-returning variant of `getTypeSimpleName`.
+Optional-returning variant of `getTypeSimpleName`. Wraps the result in `Optional.of(...)`.
 
 <ParamField path="key" type="String" required>
   The key whose type tag to retrieve.
 </ParamField>
 
+<Warning>
+  This method is implemented as `Optional.of(converter.getTypeSimpleName(key))`. Because `Optional.of` rejects `null`, calling `GetTypeSimpleName` with a key that does not exist will throw a `NullPointerException` rather than returning `Optional.empty()`. Use `getTypeSimpleName` and check for `null`, or guard with `Exists(key)` before calling this method.
+</Warning>
+
 ---
 
 ## Cache & Backup
 
-### `InvalidateCache()`
+### `InvalidateCache() → void`
 
 Marks the internal cache as dirty. The next read operation will reload data from the underlying `ConverterInterface` (i.e., from disk or the in-memory store), discarding any cached state. Use this when the backing file may have been modified externally.
 
@@ -354,7 +364,11 @@ Copies the current configuration store to `path`. Returns `true` if the backup s
 
 ### `query(boolean iKey, String keyReg, boolean iType, String typeReg, boolean iVal, String valReg) → TypeMap<String, String, String>`
 
-Performs a regex-filtered scan over all entries in the configuration store. Each stored entry is represented as a triple of `(key, typeName, encodedValue)`. The method applies three independent regex filters — one for each field — and returns only entries that satisfy all three. Each filter can be inverted with its corresponding `i*` flag.
+Performs a regex-filtered scan over all entries in the configuration store. Each stored entry is represented as a triple of `(key, typeName, encodedValue)`. The method applies three independent XOR filters — one for each field — and returns only entries that satisfy all three conditions simultaneously.
+
+For each field, an entry is **included** when `(iFlag XOR field.matches(regex))` evaluates to `true`. Concretely:
+- When `iFlag = false`: the entry is included if the field **matches** the regex.
+- When `iFlag = true`: the entry is included if the field does **not** match the regex (inversion).
 
 ```java
 // Find all entries whose key starts with "db." and whose type is "String"
@@ -368,7 +382,7 @@ for (TypeMap.Entry<String, String, String> entry : result.getEntryList()) {
 ```
 
 <ParamField path="iKey" type="boolean" required>
-  When `true`, inverts the key regex: only entries whose key does **not** match `keyReg` are included.
+  XOR flag for the key filter. When `false`, includes entries whose key matches `keyReg`. When `true`, includes entries whose key does **not** match `keyReg`.
 </ParamField>
 
 <ParamField path="keyReg" type="String" required>
@@ -376,7 +390,7 @@ for (TypeMap.Entry<String, String, String> entry : result.getEntryList()) {
 </ParamField>
 
 <ParamField path="iType" type="boolean" required>
-  When `true`, inverts the type regex: only entries whose type tag does **not** match `typeReg` are included.
+  XOR flag for the type filter. When `false`, includes entries whose type tag matches `typeReg`. When `true`, includes entries whose type tag does **not** match `typeReg`.
 </ParamField>
 
 <ParamField path="typeReg" type="String" required>
@@ -384,7 +398,7 @@ for (TypeMap.Entry<String, String, String> entry : result.getEntryList()) {
 </ParamField>
 
 <ParamField path="iVal" type="boolean" required>
-  When `true`, inverts the value regex: only entries whose stored value does **not** match `valReg` are included.
+  XOR flag for the value filter. When `false`, includes entries whose stored value matches `valReg`. When `true`, includes entries whose stored value does **not** match `valReg`.
 </ParamField>
 
 <ParamField path="valReg" type="String" required>
@@ -420,11 +434,11 @@ Optional<Integer> port = config.Get("app.port", Integer.class);
 config.BeginTransaction()
       .Set("db.host", "localhost")
       .Set("db.port", 5432)
-      .Commit()
-      .EndTransaction();
+      .Commit();
+config.EndTransaction(); // void — cannot be chained
 
 // Key inspection
-System.out.println(config.Exists("app.name"));         // true
+System.out.println(config.Exists("app.name"));            // true
 System.out.println(config.getTypeSimpleName("app.port")); // "Integer"
-System.out.println(config.getAllKeys("app\\..+"));     // [app.name, app.port, app.debug]
+System.out.println(config.getAllKeys("app\\..+"));        // [app.name, app.port, app.debug]
 ```
