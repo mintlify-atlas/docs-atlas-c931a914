@@ -1,0 +1,297 @@
+---
+title: "JungleConfig Internal Interfaces Reference"
+sidebarTitle: "Interfaces"
+description: "Reference for the core interfaces that form JungleConfig's layered architecture: TypeConverter, CacheInterface, ConverterInterface, IOHandlerInterface, and TypeMap."
+---
+
+JungleConfig is built on a strictly layered architecture where each layer communicates only with the interface immediately below it. This design allows any layer to be swapped out independently — for example, replacing the IO layer with an encrypted implementation without touching the caching or type-conversion logic. The layers are assembled bottom-up:
+
+```
+IOHandlerInterface
+    ↓
+ConverterInterface
+    ↓
+InternalCacheInterface
+    ↓
+InternalServiceInterface
+    ↓
+CacheInterface
+    ↓
+TypeConverter
+    ↓
+JungleConfig  (public API)
+```
+
+The sections below document each interface, its purpose, and the methods it declares.
+
+---
+
+## TypeConverter
+
+**Package:** `com.codehack.JungleConfig.Core`
+
+`TypeConverter` is the top-level interface that `JungleConfig` delegates every operation to. The default implementation is `NativeTypeConverter`, which holds a registry of `TypeConverterAdapter` instances and a reference to a `CacheInterface`. Every method on `JungleConfig`'s public API maps 1-to-1 to a method on this interface.
+
+<Accordion title="Interface declaration">
+```java
+public interface TypeConverter {
+    void Set(String key, Object data);
+    void Set(String key, Object data, String Type);
+    void SetPOJO(String key, Object pojo);
+
+    <T> T get(String key, Class<T> type);
+    <T> Optional<T> Get(String key, Class<T> type);
+    <T> T getCollection(String key, TypeReference<T> type);
+    <T> Optional<T> GetCollection(String key, TypeReference<T> type);
+
+    boolean Remove(String key);
+    void removeAll();
+    boolean Exists(String key);
+
+    List<String> getAllKeys();
+    List<String> getAllKeys(String regx);
+    String getTypeSimpleName(String key);
+
+    void BeginTransaction();
+    void EndTransaction();
+    void Commit();
+    void Rollback();
+    void InvalidateCache();
+
+    boolean Backup(File path, boolean override);
+
+    TypeMap<String, String, String> query(
+        boolean iKey, String keyReg,
+        boolean iType, String typeReg,
+        boolean iVal, String valReg);
+}
+```
+</Accordion>
+
+Implement this interface only when you need to replace the entire type-conversion and delegation layer. For most customization scenarios — adding support for a new type, for example — implement `TypeConverterAdapter` instead.
+
+---
+
+## CacheInterface
+
+**Package:** `com.codehack.JungleConfig.Core`
+
+`CacheInterface` sits directly below `TypeConverter` and above `InternalServiceInterface`. It adds the transaction lifecycle methods (`BeginTransaction`, `EndTransaction`, `Commit`, `rollback`) and exposes all entry-level read/write operations in terms of `TypeMap.Entry` triples rather than raw typed objects. The default implementation is `NativeExtendedCache`.
+
+<Accordion title="Interface declaration">
+```java
+public interface CacheInterface {
+    void BeginTransaction();
+    void EndTransaction();
+    void rollback();
+    void Commit();
+
+    TypeMap.Entry<String, String, String> Get(String key);
+    void Set(TypeMap.Entry<String, String, String> data);
+    boolean Remove(String key);
+    void InvalidateCache();
+
+    TypeMap<String, String, String> query(
+        boolean iKey, String keyReg,
+        boolean iType, String typeReg,
+        boolean iVal, String valReg);
+
+    boolean Backup(File path, boolean override);
+
+    void RemoveAll();
+    boolean Exists(String key);
+    List<String> getAllKeys();
+    List<String> getAllKeys(String regx);
+    String getTypeSimpleName(String key);
+}
+```
+</Accordion>
+
+At this layer, values are already serialized to strings by `NativeTypeConverter`. Each entry is a `TypeMap.Entry<String, String, String>` where the key is the configuration key, `getValue1()` is the type tag, and `getValue2()` is the encoded value string.
+
+---
+
+## ConverterInterface
+
+**Package:** `com.codehack.JungleConfig.Core`
+
+`ConverterInterface` is responsible for low-level encoding and decoding between the flat string stored by `IOHandlerInterface` and the structured `TypeMap` used by the caching layers. It handles URL-decoding, splitting the file content into key-value-type triples, and any additional transformations such as encryption. Implementations include `NativeConverter` (standard format), `NativeEncryptedConverter` (AES-encrypted), and `NativeFlatJsonConverter` (JSON format).
+
+<Accordion title="Interface declaration">
+```java
+/**
+ * Responsibility: perform low-level encoding related to file storage and key conflicts.
+ * String → [split to KeyMap, URLDecode, Decryption] → TypeMap<String,String,String>
+ */
+public interface ConverterInterface {
+    TypeMap<String, String, String> decode();
+    void encode(TypeMap<String, String, String> data);
+    boolean Backup(File path, boolean override);
+}
+```
+</Accordion>
+
+| Method | Description |
+|--------|-------------|
+| `decode()` | Reads the raw string from `IOHandlerInterface`, URL-decodes values, and parses it into a `TypeMap`. |
+| `encode(TypeMap)` | Serializes the `TypeMap` back to a string (URL-encoding values) and writes it via `IOHandlerInterface`. |
+| `Backup(File, boolean)` | Delegates to `IOHandlerInterface.Backup` after ensuring the current state is flushed. |
+
+---
+
+## IOHandlerInterface
+
+**Package:** `com.codehack.JungleConfig.Core`
+
+`IOHandlerInterface` is the lowest layer of the stack. It abstracts raw string-level I/O, allowing the rest of the system to remain agnostic about whether data lives on disk or in memory.
+
+<Accordion title="Interface declaration">
+```java
+public interface IOHandlerInterface {
+    String Read();
+    void Write(String data);
+    boolean Backup(File path, boolean override);
+}
+```
+</Accordion>
+
+| Method | Description |
+|--------|-------------|
+| `Read()` | Returns the entire contents of the backing store as a single string. |
+| `Write(String data)` | Replaces the entire contents of the backing store with `data`. |
+| `Backup(File path, boolean override)` | Copies the current store to `path`. Returns `true` on success. If `override` is `false` and `path` already exists, returns `false` without overwriting. |
+
+**Implementations:**
+
+- `NativeIOHandler` — reads from and writes to a `java.io.File` on disk.
+- `NativeInMemoryIOHandler` — holds the data string in a `String` field; no file I/O occurs. Used by `InMemoryConfig()` and `FlatJsonConfig()`.
+
+---
+
+## TypeMap
+
+**Package:** `com.codehack.JungleConfig.DataModel`
+
+`TypeMap<T, D, S>` is a generic ordered triple-entry map. Unlike `java.util.Map`, each entry holds three values: a key of type `T`, a first value of type `D`, and a second value of type `S`. Insertion order is preserved. Throughout JungleConfig, the concrete parameterization is always `TypeMap<String, String, String>`, where the three strings represent the configuration key, the type tag, and the encoded value respectively.
+
+<Accordion title="TypeMap class declaration (key members)">
+```java
+public class TypeMap<T, D, S> {
+
+    public void put(T key, D v1, S v2);
+    public void put(Entry<T, D, S> entry);
+
+    public Entry<T, D, S> get(T key);
+    public Entry<T, D, S> getEntry(T key);
+    public Entry<T, D, S> getFromIndex(int index);
+
+    public boolean containsKey(T key);
+    public boolean remove(String key);
+    public void clear();
+
+    public List<Entry<T, D, S>> getEntryList();
+    public List<T> getKeyList();
+
+    public D getValue1(T key);
+    public S getValue2(T key);
+
+    public List<Entry<T, D, S>> getEntriesOfv1(D v1);
+    public List<Entry<T, D, S>> getEntriesOfv2(S v2);
+
+    public static <T, D, S> TypeMap<T, D, S> of();
+
+    public static class Entry<T, D, S> {
+        public T getKey();
+        public D getValue1();
+        public S getValue2();
+        public void setKey(T key);
+        public void setValue1(D value1);
+        public void setValue2(S value2);
+    }
+}
+```
+</Accordion>
+
+### Key Methods
+
+| Method | Description |
+|--------|-------------|
+| `put(key, v1, v2)` | Inserts a new entry or replaces the existing entry with the same key. |
+| `get(key)` | Returns the `Entry` for `key`, or `null` if not present. |
+| `remove(String key)` | Removes the entry with the given key. Returns `true` if it existed. |
+| `containsKey(key)` | Returns `true` if an entry with the given key exists. |
+| `getEntryList()` | Returns the full ordered list of all entries. |
+| `getKeyList()` | Returns an ordered list of all keys. |
+| `clear()` | Removes all entries. |
+
+### Usage: Iterating Query Results
+
+`TypeMap` is the return type of `JungleConfig.query()`. Use `getEntryList()` to iterate the results:
+
+```java
+TypeMap<String, String, String> result =
+    config.query(false, "db\\..+", false, ".+", false, ".+");
+
+for (TypeMap.Entry<String, String, String> entry : result.getEntryList()) {
+    System.out.printf("Key: %s, Type: %s, Value: %s%n",
+        entry.getKey(),    // e.g. "db.host"
+        entry.getValue1(), // e.g. "String"
+        entry.getValue2()  // e.g. "localhost"
+    );
+}
+```
+
+---
+
+## InternalCacheInterface
+
+**Package:** `com.codehack.JungleConfig.Core`
+
+`InternalCacheInterface` is an implementation-detail interface that sits between `ConverterInterface` and `InternalServiceInterface`. It defines how pending writes and removals are batched before being flushed to the converter layer. The default implementation is `NativeInternalCache`, which accepts write and read margin thresholds that control how frequently the cache is flushed to disk.
+
+```java
+public interface InternalCacheInterface {
+    void Set(TypeMap<String, String, String> saveQuery, List<String> remList);
+    TypeMap<String, String, String> Get(TypeMap<String, String, String> saveQuery, List<String> remList);
+    void Invalidate();
+    boolean Backup(File file, boolean override);
+}
+```
+
+Developers extending JungleConfig can implement `InternalCacheInterface` to swap out the write-batching and read-margin strategy without touching any other layer.
+
+---
+
+## InternalServiceInterface
+
+**Package:** `com.codehack.JungleConfig.Core`
+
+`InternalServiceInterface` wraps `InternalCacheInterface` and adds transaction support (begin, end, commit, rollback) as well as the full suite of single-entry read/write/remove/query operations. The default implementation is `NativeInternalTransaction`, which buffers writes in a transaction log and applies them atomically on commit.
+
+```java
+public interface InternalServiceInterface {
+    void BeginTransaction();
+    void EndTransaction();
+    void Rollback();
+    void Commit();
+
+    TypeMap.Entry<String, String, String> Get(String key);
+    void Set(TypeMap.Entry<String, String, String> data);
+    boolean Remove(String key);
+    void InvalidateCache();
+
+    TypeMap<String, String, String> query(
+        boolean iKey, String keyReg,
+        boolean iType, String typeReg,
+        boolean iVal, String valReg);
+
+    void RemoveAll();
+    boolean Exists(String key);
+    List<String> getAllKeys();
+    List<String> getAllKeys(String regx);
+    String getTypeSimpleName(String key);
+    boolean Backup(File file, boolean override);
+}
+```
+
+Implement this interface to replace the transaction strategy — for example, to add two-phase commit semantics or integrate with an external transaction coordinator — while reusing all other layers unchanged.

@@ -1,0 +1,74 @@
+---
+title: "JungleConfig: Lightweight Type-Safe Config for Java"
+sidebarTitle: "Introduction"
+description: "JungleConfig stores typed key-value configuration in a compact file format. Learn what it does, how it works, and when to use it."
+---
+
+JungleConfig is a lightweight, type-safe configuration library for Java that stores key-value pairs — along with their runtime types — in a compact, human-readable file format called JConfig001. Unlike property files or plain JSON configs, every value carries an explicit type tag, so reading a key back always returns the exact Java type you stored, with no manual parsing or casting required. JungleConfig ships with built-in support for primitives, UUIDs, Java Time types, POJOs, and collections, and its layered architecture makes every layer — I/O, caching, encryption, and type conversion — independently swappable.
+
+## How it works
+
+JungleConfig persists configuration in a custom text format identified by the header `JConfig001`. Each subsequent line encodes one entry as:
+
+```
+key:TypeName=URLencodedValue
+```
+
+For example, an integer key named `app.port` with value `8080` is stored as:
+
+```
+app.port:Integer=8080
+```
+
+A string that contains special characters is URL-encoded so the format remains unambiguous:
+
+```
+app.greeting:String=Hello+World
+```
+
+The library reads this file, splits each line on the first `:` (key separator) and the first `=` (value separator), URL-decodes the value, and routes it through the appropriate type adapter to reconstruct the original Java object. Writing follows the reverse path: the type adapter serialises the object to a string, URL-encodes it, and the file is rewritten atomically.
+
+**Layered architecture.** Every operation passes through a fixed pipeline of collaborating components:
+
+| Layer | Class | Responsibility |
+|---|---|---|
+| **IOHandler** | `NativeIOHandler` / `NativeInMemoryIOHandler` | Raw file or in-memory read/write |
+| **Converter** | `NativeConverter` / `NativeEncryptedConverter` / `NativeFlatJsonConverter` | Encode and decode the JConfig001 format |
+| **Internal Cache** | `NativeInternalCache` | LRU write-back cache that batches disk I/O |
+| **Transaction** | `NativeInternalTransaction` | Tracks pending writes for commit/rollback |
+| **Extended Cache** | `NativeExtendedCache` | Second-level cache above the transaction layer |
+| **TypeConverter** | `NativeTypeConverter` | Dispatches to the correct `TypeConverterAdapter` for each Java type |
+| **JungleConfig** | `JungleConfig` | Public API facade that wires the full pipeline |
+
+The `JungleConfig` constructor wires these layers in order, so you always interact with one clean object regardless of which storage backend you chose.
+
+## Key features
+
+<CardGroup cols={2}>
+  <Card icon="shield-check" title="Type safety">
+    Every value is tagged with its Java type name at write time and automatically reconstructed at read time. No more `(String) properties.get("key")` casts.
+  </Card>
+  <Card icon="database" title="Four configuration modes">
+    Choose from file-backed (`new JungleConfig(file)`), AES-encrypted file (`EncryptedConfig`), purely in-memory (`InMemoryConfig`), or flat-JSON (`FlatJsonConfig`) — all sharing the same API.
+  </Card>
+  <Card icon="arrow-right-arrow-left" title="Atomic transactions">
+    Wrap any number of writes in `BeginTransaction()` / `Commit()` or `Rollback()` to guarantee that partial updates are never persisted.
+  </Card>
+  <Card icon="plug" title="Pluggable type adapters">
+    The `TypeConverterAdapter` interface lets you register custom serialisers for any Java type, slotting cleanly into the existing pipeline alongside the ten built-in adapters.
+  </Card>
+  <Card icon="cube" title="POJO and collection support">
+    Store arbitrary Java objects with `SetPOJO` and retrieve them with `get(key, MyClass.class)`. Store `List`, `Map`, or any generic collection with `Set` and retrieve with `getCollection` plus a Jackson `TypeReference`.
+  </Card>
+  <Card icon="bolt" title="Built-in caching">
+    A two-level cache (internal LRU + extended) sits between the API and the disk, reducing redundant I/O without any configuration on your part.
+  </Card>
+</CardGroup>
+
+## When to use JungleConfig
+
+JungleConfig is a good fit when you need a self-contained configuration store for a Java application — a CLI tool, a desktop app, a daemon, or a microservice — and you want the configuration to be readable and editable by humans without losing the type information that your code relies on. It is especially useful when you need to persist structured objects (POJOs or collections) without standing up a database, or when sensitive configuration values must be stored encrypted on disk without pulling in a heavyweight secrets manager.
+
+<Note>
+  JungleConfig requires **Java 17 or later**. Its only external runtime dependency is the Jackson suite: `jackson-databind`, `jackson-datatype-jdk8`, and `jackson-datatype-jsr310`. No other third-party libraries are required.
+</Note>

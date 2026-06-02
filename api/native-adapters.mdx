@@ -1,0 +1,190 @@
+---
+title: "Built-in Type Adapters in JungleConfig"
+sidebarTitle: "Native Adapters"
+description: "Reference for all 10 built-in TypeConverterAdapter implementations: Boolean, Integer, String, Long, Double, Float, UUID, LocalDate, LocalDateTime, and LocalTime."
+---
+
+JungleConfig ships with ten built-in `TypeConverterAdapter` implementations that cover the most common Java value types. All ten adapters are registered automatically in every instance created through the convenience constructors — `new JungleConfig(File)`, `JungleConfig.EncryptedConfig(File, String)`, `JungleConfig.InMemoryConfig()`, and `JungleConfig.FlatJsonConfig()`. You do not need to configure them explicitly; just call `Set` with a supported value and JungleConfig routes it to the correct adapter.
+
+Each adapter converts its target type to a plain string via `ConvertToSave` before the string is URL-encoded and written to the backing store. On read, the stored string is URL-decoded and passed to `CastToUse`, which reconstructs the original value.
+
+---
+
+## Adapter Reference Table
+
+| Adapter Class | `getType()` | Java Type | Storage Format |
+|---|---|---|---|
+| `NativeBooleanAdapter` | `"Boolean"` | `java.lang.Boolean` | `"true"` or `"false"` |
+| `NativeIntagerAdapter` | `"Integer"` | `java.lang.Integer` | Decimal string, e.g. `"42"` |
+| `NativeStringAdapter` | `"String"` | `java.lang.String` | Raw string (URL-encoded on disk) |
+| `NativeLongAdapter` | `"Long"` | `java.lang.Long` | Decimal string, e.g. `"9223372036854775807"` |
+| `NativeDoubleAdapter` | `"Double"` | `java.lang.Double` | `Double.toString()`, e.g. `"3.14159"` |
+| `NativeFloatAdapter` | `"Float"` | `java.lang.Float` | `Float.toString()`, e.g. `"1.23"` |
+| `NativeUUIDAdapter` | `"UUID"` | `java.util.UUID` | Standard UUID string, e.g. `"550e8400-e29b-41d4-a716-446655440000"` |
+| `NativeLocalDateAdapter` | `"LocalDate"` | `java.time.LocalDate` | ISO-8601 date, e.g. `"2024-02-29"` |
+| `NativeLocalDateTimeAdapter` | `"LocalDateTime"` | `java.time.LocalDateTime` | ISO-8601 datetime, e.g. `"2024-02-29T12:34:56"` |
+| `NativeLocalTimeAdapter` | `"LocalTime"` | `java.time.LocalTime` | ISO-8601 time, e.g. `"12:34:56"` |
+
+All adapters are in the package `com.codehack.JungleConfig.Core.Adapters`.
+
+---
+
+## Adapter Details
+
+### NativeBooleanAdapter
+
+Handles `java.lang.Boolean`. Serialization compares the object's `toString()` against `"true"` and stores either `"true"` or `"false"`. Deserialization performs a strict equality check against `"true"` — any other string (including `"True"` or `"1"`) deserializes as `false`.
+
+```java
+config.Set("feature.enabled", true);
+Boolean enabled = config.get("feature.enabled", Boolean.class); // true
+```
+
+---
+
+### NativeIntagerAdapter
+
+Handles `java.lang.Integer` via `Integer.toString()` / `Integer.valueOf()`. The class name contains a typo from the original source — see the note below.
+
+```java
+config.Set("server.port", 8080);
+Integer port = config.get("server.port", Integer.class); // 8080
+```
+
+---
+
+### NativeStringAdapter
+
+Handles `java.lang.String`. `ConvertToSave` calls `toString()` and returns the string as-is; the `ConverterInterface` layer applies URL-encoding before writing to disk, so strings containing `=`, `&`, `\n`, and similar characters are stored safely.
+
+```java
+config.Set("app.name", "My App");
+String name = config.get("app.name", String.class); // "My App"
+```
+
+---
+
+### NativeLongAdapter
+
+Handles `java.lang.Long` via `toString()` / `Long.valueOf()`. Use this adapter (or call `Set` with an explicit `"Long"` type hint) when storing values that exceed `Integer.MAX_VALUE`.
+
+```java
+config.Set("cache.maxBytes", 10_737_418_240L);
+Long maxBytes = config.get("cache.maxBytes", Long.class);
+```
+
+---
+
+### NativeDoubleAdapter
+
+Handles `java.lang.Double` via `toString()` / `Double.valueOf()`. The storage format is the output of `Double.toString()`, which uses scientific notation for very large or very small values (e.g. `"1.0E-4"`).
+
+```java
+config.Set("pi", 3.141592653589793);
+Double pi = config.get("pi", Double.class);
+```
+
+---
+
+### NativeFloatAdapter
+
+Handles `java.lang.Float` via `toString()` / `Float.valueOf()`.
+
+```java
+config.Set("ratio", 1.5f);
+Float ratio = config.get("ratio", Float.class);
+```
+
+---
+
+### NativeUUIDAdapter
+
+Handles `java.util.UUID` via `toString()` / `UUID.fromString()`. Values are stored in the standard 8-4-4-4-12 hyphenated hex format.
+
+```java
+config.Set("session.id", UUID.randomUUID());
+UUID sessionId = config.get("session.id", UUID.class);
+```
+
+---
+
+### NativeLocalDateAdapter
+
+Handles `java.time.LocalDate` via `toString()` / `LocalDate.parse()`. Values are stored in ISO-8601 date format (`yyyy-MM-dd`).
+
+```java
+config.Set("subscription.expiry", LocalDate.of(2025, 12, 31));
+LocalDate expiry = config.get("subscription.expiry", LocalDate.class);
+```
+
+---
+
+### NativeLocalDateTimeAdapter
+
+Handles `java.time.LocalDateTime` via `toString()` / `LocalDateTime.parse()`. Values are stored as ISO-8601 local date-time strings (e.g. `"2024-02-29T12:34:56"`).
+
+```java
+config.Set("job.lastRun", LocalDateTime.now());
+LocalDateTime lastRun = config.get("job.lastRun", LocalDateTime.class);
+```
+
+---
+
+### NativeLocalTimeAdapter
+
+Handles `java.time.LocalTime` via `toString()` / `LocalTime.parse()`. Values are stored as ISO-8601 time strings (e.g. `"12:34:56"`).
+
+```java
+config.Set("schedule.startTime", LocalTime.of(9, 0));
+LocalTime startTime = config.get("schedule.startTime", LocalTime.class);
+```
+
+---
+
+## Usage Example
+
+The following snippet demonstrates storing and reading every major built-in type using an in-memory config instance:
+
+```java
+import com.codehack.JungleConfig.JungleConfig;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.LocalTime;
+import java.util.UUID;
+
+JungleConfig config = JungleConfig.InMemoryConfig();
+
+// Write
+config.Set("flag",      true);
+config.Set("count",     42);
+config.Set("label",     "Hello");
+config.Set("amount",    3.14159);
+config.Set("ratio",     1.5f);
+config.Set("bigNum",    9_000_000_000L);
+config.Set("id",        UUID.randomUUID());
+config.Set("created",   LocalDate.now());
+config.Set("timestamp", LocalDateTime.now());
+config.Set("startTime", LocalTime.of(9, 0));
+
+// Read
+Boolean   flag      = config.get("flag",      Boolean.class);
+Integer   count     = config.get("count",     Integer.class);
+String    label     = config.get("label",     String.class);
+Double    amount    = config.get("amount",    Double.class);
+Float     ratio     = config.get("ratio",     Float.class);
+Long      bigNum    = config.get("bigNum",    Long.class);
+UUID      id        = config.get("id",        UUID.class);
+LocalDate created   = config.get("created",   LocalDate.class);
+LocalDateTime ts    = config.get("timestamp", LocalDateTime.class);
+LocalTime startTime = config.get("startTime", LocalTime.class);
+```
+
+---
+
+<Note>
+  `NativeIntagerAdapter` contains a deliberate typo in its class name — "Intager" instead of "Integer" — inherited from the original source code. The class name is `NativeIntagerAdapter` and this is the actual identifier you will see in stack traces, imports, and reflection output. However, `getType()` correctly returns `Integer.class.getSimpleName()`, which equals `"Integer"`, so there is no functional impact: `config.Set("count", 42)` and `config.get("count", Integer.class)` both work exactly as expected.
+</Note>
+
+<Tip>
+  Need to store a type not covered by the built-in adapters — such as `BigDecimal`, `Enum`, or a custom value class? Implement `TypeConverterAdapter` and register it with your `NativeTypeConverter`. See [Custom Adapters](/guides/custom-adapters) for a step-by-step guide.
+</Tip>

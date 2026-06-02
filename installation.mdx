@@ -1,0 +1,109 @@
+---
+title: "Install JungleConfig in Your Java Project"
+sidebarTitle: "Installation"
+description: "Add JungleConfig and its Jackson dependencies to Maven or Gradle. Covers Java version requirements and building from source."
+---
+
+JungleConfig is distributed as a standard JAR and declared through the usual Maven or Gradle dependency mechanisms. This page covers everything you need to add it to a new or existing project, whether you pull it from a local Maven repository after building from source or declare it directly in your build file.
+
+## Requirements
+
+Before adding JungleConfig, confirm your environment meets these prerequisites:
+
+- **Java 17 or later.** The library is compiled with `--release 19` but is compatible with any JDK 17+ runtime. Older JDKs are not supported because the library uses records and sealed types introduced in that era.
+- **Maven 3.6+ or Gradle 7+.** Either build tool works; the dependency coordinates are the same.
+- **Jackson modules.** JungleConfig relies on three Jackson modules for POJO serialisation and Java Time support. They are listed as direct dependencies below. If your project already pulls in a compatible Jackson version transitively, you can omit the explicit declarations — but it is safer to pin them.
+
+## Maven
+
+Add the following block inside the `<dependencies>` section of your `pom.xml`:
+
+```xml
+<dependencies>
+  <!-- JungleConfig -->
+  <dependency>
+    <groupId>com.codehack</groupId>
+    <artifactId>Jconfig</artifactId>
+    <version>1.0-SNAPSHOT</version>
+  </dependency>
+
+  <!-- Jackson: core databind -->
+  <dependency>
+    <groupId>com.fasterxml.jackson.core</groupId>
+    <artifactId>jackson-databind</artifactId>
+    <version>2.18.3</version>
+  </dependency>
+
+  <!-- Jackson: JDK 8 type support (Optional, etc.) -->
+  <dependency>
+    <groupId>com.fasterxml.jackson.datatype</groupId>
+    <artifactId>jackson-datatype-jdk8</artifactId>
+    <version>2.18.2</version>
+  </dependency>
+
+  <!-- Jackson: Java Time support (LocalDate, LocalDateTime, etc.) -->
+  <dependency>
+    <groupId>com.fasterxml.jackson.datatype</groupId>
+    <artifactId>jackson-datatype-jsr310</artifactId>
+    <version>2.17.1</version>
+  </dependency>
+</dependencies>
+```
+
+Run `mvn dependency:resolve` after saving to verify all artifacts can be downloaded.
+
+## Gradle
+
+If you use Gradle with the Kotlin DSL, add the equivalent declarations to the `dependencies` block in your `build.gradle.kts`:
+
+```kotlin
+dependencies {
+    // JungleConfig
+    implementation("com.codehack:Jconfig:1.0-SNAPSHOT")
+
+    // Jackson: core databind
+    implementation("com.fasterxml.jackson.core:jackson-databind:2.18.3")
+
+    // Jackson: JDK 8 type support (Optional, etc.)
+    implementation("com.fasterxml.jackson.datatype:jackson-datatype-jdk8:2.18.2")
+
+    // Jackson: Java Time support (LocalDate, LocalDateTime, etc.)
+    implementation("com.fasterxml.jackson.datatype:jackson-datatype-jsr310:2.17.1")
+}
+```
+
+For the Groovy DSL, replace the `"..."` string syntax with single-quoted strings and the `implementation(...)` calls remain identical.
+
+Run `./gradlew dependencies --configuration runtimeClasspath` to confirm the dependency tree resolves without conflicts.
+
+<Note>
+  All three Jackson modules are required at runtime. `jackson-databind` handles POJO and collection serialisation. `jackson-datatype-jdk8` adds support for `Optional`, `OptionalInt`, and similar JDK 8 container types. `jackson-datatype-jsr310` enables native serialisation of `LocalDate`, `LocalDateTime`, `LocalTime`, and the rest of the `java.time` package.
+</Note>
+
+## Building from source
+
+If you prefer to build JungleConfig yourself — for example to apply a local patch or to inspect the compiled output — clone the repository and run the Maven package goal:
+
+```bash
+git clone https://github.com/himansaBro/JungleConfig.git
+cd JungleConfig/Jconfig
+mvn package -DskipTests
+```
+
+The compiled JAR will be placed at:
+
+```
+target/Jconfig-1.0-SNAPSHOT.jar
+```
+
+Install it into your local Maven repository so other projects on the same machine can declare it as a dependency:
+
+```bash
+mvn install -DskipTests
+```
+
+After running `mvn install`, the `com.codehack:Jconfig:1.0-SNAPSHOT` coordinates will resolve from your `~/.m2/repository` cache without needing a remote repository.
+
+<Tip>
+  Always use the latest patch release of each Jackson dependency. The versions listed here (`2.18.3`, `2.18.2`, `2.17.1`) were the current stable releases at the time of writing. Check [the Jackson releases page](https://github.com/FasterXML/jackson/wiki/Jackson-Releases) for any newer patch versions that include security or bug fixes, and update your `pom.xml` or `build.gradle.kts` accordingly.
+</Tip>

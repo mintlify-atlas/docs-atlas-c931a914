@@ -1,0 +1,84 @@
+---
+title: "JConfig001 File Format Explained"
+sidebarTitle: "File Format"
+description: "The JConfig001 format encodes key-value-type triples as URL-safe lines. Understand the structure, encoding rules, and key constraints."
+---
+
+JungleConfig's native on-disk representation is called **JConfig001**. It is a plain-text, line-oriented format designed to be readable by humans, diff-friendly in version control, and safe for values that contain arbitrary characters — including JSON blobs, ISO dates, and strings with spaces or punctuation. Every configuration entry is stored as a self-describing triple of key, type tag, and URL-encoded value.
+
+## Structure
+
+A JConfig001 file begins with the magic header `JConfig001` on its own line. Each subsequent non-blank line encodes a single entry in the form:
+
+```
+key:TypeName=URLencodedValue
+```
+
+The parser locates the first `:` to split the key from the type tag, and the first `=` after that to split the type tag from the encoded value. This means keys cannot contain `:` or `=`, but values may contain them freely once URL-decoded.
+
+A realistic config file looks like this:
+
+```
+JConfig001
+app.name:String=MyApplication
+app.port:Integer=8080
+app.debug:Boolean=true
+app.pi:Double=3.14159
+app.uuid:UUID=550e8400-e29b-41d4-a716-446655440000
+```
+
+The `NativeConverter.decode()` method reads this file, splits each line by `:` and `=`, and URL-decodes the value segment. The `NativeConverter.encode()` method reconstructs the file from the in-memory `TypeMap`, writing the magic header first and then one line per entry.
+
+## Encoding
+
+Values are encoded with `java.net.URLEncoder` (using `StandardCharsets.UTF_8`) before being written to disk, and decoded with `java.net.URLDecoder` on read. Under standard URL encoding, space characters become `+` and special characters such as `&`, `=`, `#`, and non-ASCII bytes become `%XX` percent-escape sequences.
+
+This means any string value is safe to store — including multi-line JSON, ISO-formatted timestamps, binary-safe Base64 strings, and values that happen to contain `=` signs. For example, a POJO serialized to JSON such as `{"id":1,"name":"Alice"}` is stored as:
+
+```
+user:Json=%7B%22id%22%3A1%2C%22name%22%3A%22Alice%22%7D
+```
+
+and decoded back to `{"id":1,"name":"Alice"}` transparently on read.
+
+## Type Tag
+
+The middle field between `:` and `=` is the **type tag**. JungleConfig records this as the Java class simple name of the value — for example, `String`, `Integer`, `Boolean`, `UUID`, `LocalDate`, `LocalDateTime`, or `LocalTime`.
+
+When a type does not have a registered built-in adapter and the fallback serialization is enabled (the default), JungleConfig uses Jackson to serialize the object to JSON and stores the type tag as `Json`. This covers POJOs, `List`, `Map`, and other collection types. On read, Jackson deserializes the JSON back to the requested type.
+
+```
+# Built-in adapter type tag
+app.timeout:Long=30000
+
+# POJO or collection type tag
+app.serverConfig:Json=%7B%22host%22%3A%22localhost%22%2C%22port%22%3A9090%7D
+```
+
+## Key Constraints
+
+Keys are validated by `NativeConverter` before every write. A key must **not** contain any of the following characters:
+
+| Forbidden character | Reason |
+|---------------------|--------|
+| `:` (colon) | Used as the separator between key and type tag |
+| `=` (equals sign) | Used as the separator between type tag and value |
+| `\n` (newline) | Each entry occupies exactly one line |
+
+Any other UTF-8 character sequence is permitted in a key, including dots (`.`), slashes, underscores, hyphens, and non-ASCII characters. Dotted key names such as `app.server.port` are a popular convention for organizing related settings into logical groups.
+
+<Warning>
+Do not manually edit files created by `EncryptedConfig`. The entire JConfig001 text — including the `JConfig001` header and all entry lines — is encrypted as a single block and stored as an opaque Base64 string. Modifying even one character of a Base64-encoded encrypted file will corrupt the ciphertext and cause decryption to fail with a `RuntimeException`.
+</Warning>
+
+## Encrypted Format
+
+When using `JungleConfig.EncryptedConfig(file, password)`, the JConfig001 text produced by `NativeConverter` is passed through an AES-256/GCM encryption layer before being written to disk. The on-disk layout (before Base64 encoding) is:
+
+```
+[ 16-byte salt ][ 12-byte IV ][ AES/GCM ciphertext ]
+```
+
+The entire byte array is then Base64-encoded and written to the file as a single line of text. A fresh salt and IV are generated with `SecureRandom` on every write, so the on-disk Base64 string changes even when the plaintext config has not changed. The key is derived from the password and salt using PBKDF2WithHmacSHA256 at 100,000 iterations, producing a 256-bit AES key.
+
+On read, the Base64 string is decoded, the salt and IV are extracted, the key is re-derived using the same password, and the GCM cipher decrypts the ciphertext back to the plaintext JConfig001 document that the parent `NativeConverter` then parses normally.

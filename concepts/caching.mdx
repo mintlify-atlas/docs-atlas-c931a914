@@ -1,0 +1,63 @@
+---
+title: "Read/Write Cache in JungleConfig"
+sidebarTitle: "Caching"
+description: "JungleConfig's NativeInternalCache reduces file I/O by batching reads and writes. Learn how the flush thresholds work and how to invalidate the cache."
+---
+
+JungleConfig sits a read/write cache between your application and the file system to minimize the number of expensive disk operations. Rather than decoding the config file on every `get` call and re-encoding it on every `Set` call, the cache keeps an in-memory copy of the entire `TypeMap` and only flushes to or from disk when specific thresholds are crossed.
+
+## How the Cache Works
+
+The cache is implemented by `NativeInternalCache`, which wraps the lower-level `ConverterInterface` (i.e., `NativeConverter`, `NativeEncryptedConverter`, or `NativeFlatJsonConverter`). It holds two internal counters — `currentReads` and `currentWrites` — and a dirty flag called `isDirty`.
+
+Before every read operation, `NativeInternalCache.getCache()` evaluates three conditions:
+
+| Condition | Effect |
+|-----------|--------|
+| `isDirty == true` | Immediately re-reads the file and resets the counters and dirty flag |
+| `currentReads > MAX_READS_MARGE` | Re-reads the file (default threshold: **100** reads) |
+| `currentWrites > MAX_WRITES_MARGE` | Re-reads the file (default threshold: **10** writes) |
+
+If none of these conditions are met, the cached `TypeMap` is returned as-is and `currentReads` is incremented. When a condition fires, the cache calls `converter.decode()` to reload the file, resets both counters to zero, and clears the dirty flag.
+
+The default thresholds — `MAX_WRITES_MARGE = 10` and `MAX_READS_MARGE = 100` — are hard-wired in all four `JungleConfig` factory constructors:
+
+```java
+new NativeInternalCache(converter, /* MAX_WRITES_MARGE */ 10, /* MAX_READS_MARGE */ 100, /* useCache */ true)
+```
+
+This means the file is re-read at most once every 100 reads or once every 10 writes, whichever comes first — reducing file I/O dramatically in read-heavy workloads.
+
+## Invalidating the Cache
+
+If another process or thread modifies the underlying config file, the in-memory cache will be stale until one of the automatic thresholds fires. You can force an immediate reload by calling `InvalidateCache()`:
+
+```java
+JungleConfig config = new JungleConfig(new File("app.conf"));
+
+// ... use config normally ...
+
+// Force reload from disk on the next read:
+config.InvalidateCache();
+String name = config.get("app.name", String.class); // re-reads file
+```
+
+`InvalidateCache()` simply sets `isDirty = true` inside `NativeInternalCache`. The actual file read is deferred until the next call to any method that needs the cached data — `get`, `Get`, `getCollection`, `Exists`, `getAllKeys`, etc. This means invalidation is cheap: it is always a single boolean assignment.
+
+## Transactions and the Cache
+
+When you use `BeginTransaction()`, pending `Set` and `Remove` operations are buffered in memory by `NativeInternalTransaction` and are not written to the file or reflected in the cache until you call `Commit()` or `EndTransaction()`. At that point the transaction writes are merged into the `TypeMap` and the cache is updated atomically with the flush.
+
+```java
+config.BeginTransaction();
+    config.Set("app.version", "2.0.0");
+    config.Set("app.debug", false);
+    config.Remove("legacy.flag");
+config.Commit(); // all three changes written atomically; cache updated
+```
+
+Calling `Rollback()` inside a transaction discards all buffered changes without touching the cache or the file.
+
+<Note>
+The in-memory mode (`JungleConfig.InMemoryConfig()`) and flat JSON mode (`JungleConfig.FlatJsonConfig()`) both use the same `NativeInternalCache` wrapper with the same thresholds, but their backing store is a `NativeInMemoryIOHandler` rather than a real file. Re-reading from the in-memory handler is effectively a no-op copy of an in-process string, so the cache threshold logic still runs but the I/O cost is negligible. `InvalidateCache()` is safe to call in these modes — it simply forces a copy of the in-memory string rather than a disk read.
+</Note>

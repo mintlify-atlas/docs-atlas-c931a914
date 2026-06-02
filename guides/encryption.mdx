@@ -1,0 +1,73 @@
+---
+title: "Encrypted Configuration with JungleConfig"
+sidebarTitle: "Encryption"
+description: "Use JungleConfig.EncryptedConfig to store your configuration file encrypted with AES-256/GCM and a PBKDF2-derived key. No extra setup required."
+---
+
+`EncryptedConfig` wraps the standard JConfig001 format in **AES-256/GCM** encryption. The password you supply is processed with PBKDF2WithHmacSHA256 (100,000 iterations, 256-bit output) to derive a strong encryption key, meaning the file stored on disk is pure ciphertext — completely unreadable without the correct password. The read and write APIs are identical to every other JungleConfig mode, so switching to encrypted storage requires only a one-line change at construction time.
+
+## Creating an encrypted config
+
+Pass a `File` and a password string to `JungleConfig.EncryptedConfig`. From that point on, every write automatically encrypts the data before touching the filesystem.
+
+```java
+import com.codehack.JungleConfig.JungleConfig;
+import java.io.File;
+
+JungleConfig config = JungleConfig.EncryptedConfig(
+    new File("secrets.conf"),
+    "my-strong-password"
+);
+
+config.Set("db.password", "s3cr3t!");
+config.Set("api.key", "abc-def-xyz");
+```
+
+## Reading back encrypted values
+
+Open the config file with the same password and call `get` or `Get` exactly as you would in plain-file mode. Decryption is handled transparently inside `NativeEncryptedConverter` before the data reaches your application code.
+
+```java
+JungleConfig config = JungleConfig.EncryptedConfig(
+    new File("secrets.conf"),
+    "my-strong-password"
+);
+
+String dbPassword = config.get("db.password", String.class); // "s3cr3t!"
+String apiKey     = config.get("api.key", String.class);     // "abc-def-xyz"
+```
+
+## Encryption details
+
+The following parameters are hardcoded in `NativeEncryptedConverter` and cannot be changed without a custom converter:
+
+- **Algorithm:** AES-256/GCM/NoPadding
+- **Key derivation:** PBKDF2WithHmacSHA256, 100,000 iterations, 256-bit output key
+- **Salt:** 16 bytes, generated fresh on every write using `SecureRandom`
+- **IV (Initialization Vector):** 12 bytes (96 bits, the GCM-recommended size), generated fresh on every write using `SecureRandom`
+- **On-disk layout:** `Base64( salt[16 bytes] + IV[12 bytes] + ciphertext )`
+
+The 128-bit GCM authentication tag is appended by `javax.crypto.Cipher` automatically and is included inside the ciphertext portion of the layout above.
+
+<Warning>
+  The salt and IV are regenerated on **every write**. If you compare the raw file contents after two writes of the same data, the Base64 strings will be completely different each time. This is the correct and expected behaviour — unique salt and IV values per write are essential to GCM security. Do not treat ciphertext equality as a reliable check for whether values have changed.
+</Warning>
+
+<Warning>
+  The password is converted to a `char[]` inside `NativeEncryptedConverter` for slightly safer handling compared to a `String`. If you build a custom stack that directly holds a `NativeEncryptedConverter` reference and need to clear the password from heap memory after use, call `clearPassword()` on the converter instance. The `JungleConfig` facade does not expose `clearPassword()` directly, so this requires access to the underlying converter object.
+</Warning>
+
+## When to use encrypted config
+
+Use `EncryptedConfig` whenever the configuration file contains data that must not be readable at rest:
+
+- Database credentials (usernames, passwords, connection strings)
+- Third-party API keys and tokens
+- Signing secrets or private key material
+- Configuration files that ship alongside a deployed binary and could be read by anyone with filesystem access
+
+For non-sensitive settings such as UI preferences or feature flags, the plain `JungleConfig(File)` constructor is simpler and avoids the decryption overhead on every read.
+
+<Tip>
+  Avoid hardcoding the password in your source code. Instead, supply it at runtime from an environment variable (`System.getenv("CONFIG_PASSWORD")`), a secrets manager (AWS Secrets Manager, HashiCorp Vault, etc.), or a prompt that reads from `System.console()`. This keeps the password out of version control and build artifacts while still benefiting from the at-rest encryption that `EncryptedConfig` provides.
+</Tip>

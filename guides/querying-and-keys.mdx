@@ -1,0 +1,111 @@
+---
+title: "Querying Keys and Filtering Config Data"
+sidebarTitle: "Querying & Keys"
+description: "Use JungleConfig's query, getAllKeys, Exists, and getTypeSimpleName methods to inspect and filter stored configuration entries by key, type, or value patterns."
+---
+
+JungleConfig exposes several methods for listing, inspecting, and filtering stored entries without reading and deserializing every value individually. You can check whether a specific key is present, enumerate all keys in the store, retrieve the stored type tag for any entry, run a multi-axis regex query across keys, types, and raw values, or delete entries — all without knowing the contents of the config file in advance.
+
+## Checking key existence
+
+`Exists(String key)` returns `true` if the key is present in the current view of the store (accounting for any pending transaction state) and `false` otherwise. It does not deserialize the stored value.
+
+```java
+config.Set("feature.darkMode", true);
+
+boolean hasDarkMode = config.Exists("feature.darkMode"); // true
+boolean hasTheme    = config.Exists("feature.theme");    // false
+```
+
+## Listing all keys
+
+`getAllKeys()` returns a `List<String>` of every key currently in the store, in insertion order. The overload `getAllKeys(String regx)` filters that list by a Java regex and returns only the matching keys.
+
+```java
+config.Set("user.name", "Alice");
+config.Set("user.role", "admin");
+config.Set("app.version", "2.0");
+
+List<String> all      = config.getAllKeys();
+// ["user.name", "user.role", "app.version"]
+
+List<String> userKeys = config.getAllKeys("user\\..+");
+// ["user.name", "user.role"]
+```
+
+Both variants are always consistent with pending transaction state — keys queued by `Set` appear in the result even before a `Commit`, and keys queued by `Remove` are excluded.
+
+## Inspecting stored types
+
+Every entry in JungleConfig is stored with an explicit type tag that identifies which adapter was used to serialize it. `getTypeSimpleName(String key)` returns that tag as a `String` (for example, `"String"`, `"Integer"`, `"Boolean"`, `"Json"`). `GetTypeSimpleName(String key)` returns the same value wrapped in an `Optional<String>`.
+
+```java
+config.Set("timeout", 30);
+config.Set("hostname", "localhost");
+config.Set("debug", false);
+
+String timeoutType  = config.getTypeSimpleName("timeout");  // "Integer"
+String hostnameType = config.getTypeSimpleName("hostname"); // "String"
+String debugType    = config.getTypeSimpleName("debug");    // "Boolean"
+```
+
+Calling `getTypeSimpleName` on a key that does not exist returns `null`. Use `GetTypeSimpleName` (capital G) if you prefer an `Optional` to avoid a null check.
+
+## Advanced querying with query()
+
+`query` lets you filter all stored entries in one call using six parameters that form three independent match conditions — one for the key, one for the type tag, and one for the raw stored value. Each condition is a `(boolean invert, String regex)` pair.
+
+```java
+TypeMap<String, String, String> query(
+    boolean iKey,   String keyReg,   // key must / must not match keyReg
+    boolean iType,  String typeReg,  // type tag must / must not match typeReg
+    boolean iVal,   String valReg    // raw value must / must not match valReg
+)
+```
+
+Set the `boolean` flag to `false` to require that the regex matches, or `true` to require that it does **not** match (XOR semantics). All three conditions must be satisfied for an entry to appear in the result.
+
+| `iKey` | `keyReg` | Effect |
+|---|---|---|
+| `false` | `"app\\..+"` | Includes keys that start with `app.` |
+| `true` | `"app\\..+"` | Excludes keys that start with `app.` |
+| `false` | `"Integer"` | When used as `iType/typeReg`, includes only Integer-typed entries |
+
+The method returns a `TypeMap<String, String, String>` where each entry holds the key, the type tag, and the raw stored value string.
+
+```java
+import com.codehack.JungleConfig.DataModel.TypeMap;
+
+config.Set("timeout", 30);
+config.Set("retries", 5);
+config.Set("hostname", "localhost");
+
+// Find all Integer-typed entries
+TypeMap<String, String, String> results = config.query(
+    false, ".+",       // iKey=false:  key matches .+ (all keys)
+    false, "Integer",  // iType=false: type tag matches "Integer" exactly
+    false, ".+"        // iVal=false:  raw value matches .+ (any non-empty value)
+);
+
+for (TypeMap.Entry<String, String, String> entry : results.getEntryList()) {
+    System.out.println(entry.getKey() + " = " + entry.getValue2());
+}
+// timeout = 30
+// retries = 5
+```
+
+`entry.getKey()` is the config key, `entry.getValue1()` is the type tag, and `entry.getValue2()` is the raw stored string before deserialization.
+
+## Removing entries
+
+`Remove(String key)` deletes a single entry and returns `true` if the key existed, or `false` if it was not present. `RemoveAllKeys()` clears every entry in the store in one operation. Both methods respect the current transaction mode — in manual mode the removals are buffered until `Commit` or `EndTransaction`.
+
+```java
+boolean removed = config.Remove("user.role"); // true if key existed
+
+config.RemoveAllKeys(); // clears everything
+```
+
+<Note>
+  `getAllKeys(String regx)` is implemented with `String.matches()`, which requires the **entire** key string to match the regex — not just a substring. This means you must use a pattern that covers the whole key. For example, `"user\\..+"` matches any key that starts with `user.` followed by one or more characters. A pattern like `"user\\."` would only match the six-character string `user.` exactly and would never match real keys such as `user.name`. When in doubt, use anchored patterns (`"user\\..+"`) or prefix with `".*"` to allow leading content.
+</Note>

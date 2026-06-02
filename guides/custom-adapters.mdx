@@ -1,0 +1,106 @@
+---
+title: "Writing Custom Type Adapters for JungleConfig"
+sidebarTitle: "Custom Adapters"
+description: "Implement TypeConverterAdapter to teach JungleConfig how to serialize and deserialize any Java type not covered by the built-in adapters."
+---
+
+The `TypeConverterAdapter` interface is JungleConfig's extension point for type serialization. Each adapter handles one Java type and teaches the framework two things: how to convert an object of that type into a plain string for storage, and how to reconstruct the object from that string when reading. Once registered, JungleConfig will use your adapter automatically whenever it encounters that type — identified by the simple class name returned from `getType()` — as the type tag stored alongside each entry.
+
+## The TypeConverterAdapter interface
+
+The interface lives in `com.codehack.JungleConfig.Core` and has three methods:
+
+```java
+public interface TypeConverterAdapter {
+    String getType();                    // returns the Java class simple name
+    String ConvertToSave(Object object); // object → string for storage
+    Object CastToUse(String data);       // string → object on read
+}
+```
+
+- **`getType()`** — must return exactly the value that will appear as the type tag in the backing file. The conventional choice is `YourClass.class.getSimpleName()`, which produces the unqualified class name (for example, `"BigDecimal"`).
+- **`ConvertToSave(Object)`** — receives the object to be stored and must return a non-null string representation. The string may be any format you choose, as long as `CastToUse` can reconstruct the original value from it.
+- **`CastToUse(String)`** — receives the stored string and must return a correctly-typed object. The returned value is cast to the requested type by `NativeTypeConverter`, so type mismatches will surface as `ClassCastException` at call sites.
+
+## Example: BigDecimal adapter
+
+The ten built-in adapters (`NativeBooleanAdapter`, `NativeIntagerAdapter`, `NativeStringAdapter`, and so on) follow exactly this pattern. Here is a complete adapter for `java.math.BigDecimal`:
+
+```java
+import com.codehack.JungleConfig.Core.TypeConverterAdapter;
+import java.math.BigDecimal;
+
+public class BigDecimalAdapter implements TypeConverterAdapter {
+
+    @Override
+    public String getType() {
+        return BigDecimal.class.getSimpleName(); // "BigDecimal"
+    }
+
+    @Override
+    public String ConvertToSave(Object object) {
+        return object.toString(); // e.g. "123.456"
+    }
+
+    @Override
+    public Object CastToUse(String data) {
+        return new BigDecimal(data);
+    }
+}
+```
+
+`BigDecimal.toString()` produces a canonical string (for example, `"9.99"` or `"1.23E+5"`) that the `BigDecimal(String)` constructor can always reconstruct exactly, making it a safe round-trip format.
+
+## Registering the adapter
+
+Custom adapters are passed to the `NativeTypeConverter` constructor's varargs `Adapters` parameter. Because the `JungleConfig` convenience constructors (`new JungleConfig(File)`, `InMemoryConfig()`, etc.) build the full stack internally with only the default adapters, you need to construct the stack yourself to inject a custom adapter. Wire all the layers in order from innermost to outermost:
+
+```java
+import com.codehack.JungleConfig.JungleConfig;
+import com.codehack.JungleConfig.Core.Implim.TypeConverter.NativeTypeConverter;
+import com.codehack.JungleConfig.Core.Implim.Cache.NativeExtendedCache;
+import com.codehack.JungleConfig.Core.Implim.Service.NativeInternalTransaction;
+import com.codehack.JungleConfig.Core.Implim.Cache.NativeInternalCache;
+import com.codehack.JungleConfig.Core.Implim.Converter.NativeConverter;
+import com.codehack.JungleConfig.Core.Implim.IO.NativeIOHandler;
+import java.io.File;
+import java.math.BigDecimal;
+
+JungleConfig config = new JungleConfig(
+    new NativeTypeConverter(
+        new NativeExtendedCache(
+            new NativeInternalTransaction(
+                new NativeInternalCache(
+                    new NativeConverter(new NativeIOHandler(new File("app.conf"))),
+                    10, 100, true))),
+        true,
+        // built-in adapters can be included alongside custom ones
+        new BigDecimalAdapter()
+    )
+);
+
+config.Set("price", new BigDecimal("9.99"));
+BigDecimal price = config.get("price", BigDecimal.class);
+```
+
+Pass all the adapters you need — both custom and replicated built-ins — as additional varargs after the `FALLBACK_TO_SERIALIZE` boolean.
+
+## Using the type hint overload
+
+If the runtime class of your object does not produce the right simple name (for instance, because you're passing a subclass or a value wrapped in another type), use the three-argument `Set` overload to specify the adapter key explicitly:
+
+```java
+// Force JungleConfig to use BigDecimalAdapter even if the runtime type
+// resolves to a subclass of BigDecimal.
+config.Set("price", myValue, "BigDecimal");
+```
+
+The third argument is matched directly against the map of registered adapter keys, bypassing the automatic `getClass().getSimpleName()` lookup.
+
+<Tip>
+  To include the full set of built-in adapters alongside your custom ones, replicate the ten native adapter classes that `getDefaultAdapters()` uses internally: `NativeBooleanAdapter`, `NativeIntagerAdapter`, `NativeStringAdapter`, `NativeLongAdapter`, `NativeDoubleAdapter`, `NativeFloatAdapter`, `NativeUUIDAdapter`, `NativeLocalDateAdapter`, `NativeLocalDateTimeAdapter`, and `NativeLocalTimeAdapter`. Pass instances of all of them (plus your custom adapter) in the varargs list. The method `getDefaultAdapters()` itself is private and cannot be called from outside the `JungleConfig` class.
+</Tip>
+
+<Note>
+  The second constructor argument to `NativeTypeConverter` is the `FALLBACK_TO_SERIALIZE` flag. When set to `true` (which is the default in all convenience constructors), any type that has no matching adapter is automatically serialized to JSON using Jackson and stored with the type tag `"Json"`. When set to `false`, encountering an unmapped type throws `InvalidConfigFormatException` instead — useful in strict environments where unexpected types should be treated as programming errors rather than silently handled.
+</Note>

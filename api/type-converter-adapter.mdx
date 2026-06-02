@@ -1,0 +1,128 @@
+---
+title: "TypeConverterAdapter Interface Reference"
+sidebarTitle: "TypeConverterAdapter"
+description: "Implement TypeConverterAdapter to register custom serialization logic for any Java type in JungleConfig's type system."
+---
+
+`TypeConverterAdapter` is the extension point that teaches JungleConfig how to serialize and deserialize a specific Java type. Every value stored through `JungleConfig.Set` is routed to the adapter whose `getType()` matches the value's class simple name. If no matching adapter exists and Jackson fallback is enabled, the value is serialized as JSON instead. Implementing this interface and registering the adapter with `NativeTypeConverter` gives you full, zero-overhead control over how a type is persisted to disk.
+
+**Package:** `com.codehack.JungleConfig.Core`
+
+---
+
+## Interface Declaration
+
+```java
+public interface TypeConverterAdapter {
+    String getType();
+    String ConvertToSave(Object object);
+    Object CastToUse(String data);
+}
+```
+
+---
+
+## Method Reference
+
+### `getType() → String`
+
+Returns the type identifier that this adapter handles. JungleConfig uses this string as the lookup key when deciding which adapter to invoke for a given value. The returned value **must** equal the Java class simple name of the type you are supporting — that is, `MyClass.class.getSimpleName()`.
+
+For example:
+- `BigDecimal.class.getSimpleName()` → `"BigDecimal"`
+- `UUID.class.getSimpleName()` → `"UUID"`
+- `LocalDate.class.getSimpleName()` → `"LocalDate"`
+
+When `JungleConfig.Set(key, value)` is called without an explicit type hint, the framework calls `value.getClass().getSimpleName()` and looks for an adapter with a matching `getType()`. When `JungleConfig.Set(key, value, type)` is called with an explicit hint, the `type` argument is compared directly to `getType()`.
+
+---
+
+### `ConvertToSave(Object object) → String`
+
+Converts the in-memory object to a plain `String` suitable for storage. The returned string is URL-encoded by the underlying `ConverterInterface` before being written to the configuration file, so you do not need to escape special characters yourself — return the natural string representation of the value.
+
+<ParamField path="object" type="Object" required>
+  The value to serialize. Guaranteed to be an instance of the type this adapter handles when called through the normal `JungleConfig.Set` path.
+</ParamField>
+
+The returned string must be round-trip compatible with `CastToUse`: `CastToUse(ConvertToSave(x))` must return a value equal to `x`.
+
+---
+
+### `CastToUse(String data) → Object`
+
+Converts the stored string back to the target Java type. The string passed here has already been URL-decoded by the `ConverterInterface` layer — it is the same string that `ConvertToSave` originally returned.
+
+<ParamField path="data" type="String" required>
+  The URL-decoded string previously produced by `ConvertToSave`.
+</ParamField>
+
+<Note>
+  `CastToUse` returns `Object`, not a generic `T`. The `NativeTypeConverter` casts the return value to the type requested by the caller. Your implementation must therefore return an instance of exactly the class this adapter handles. Returning the wrong type will cause a `ClassCastException` at the call site.
+</Note>
+
+---
+
+## Registration
+
+Custom adapters are registered by passing them as varargs to `NativeTypeConverter`'s constructor:
+
+```java
+NativeTypeConverter converter = new NativeTypeConverter(
+    cacheInterface,
+    true,                    // fallback to Jackson if no adapter matches
+    new BigDecimalAdapter(),
+    new NativeBooleanAdapter(),
+    // ... other adapters
+);
+JungleConfig config = new JungleConfig(converter);
+```
+
+The `JungleConfig(TypeConverter)` constructor accepts any fully assembled `TypeConverter`, so you can compose custom stacks while still using the standard caching and transaction layers. See the [Custom Adapters guide](/guides/custom-adapters) for a complete wiring walkthrough.
+
+---
+
+## Example: BigDecimal Adapter
+
+The following is a complete, production-ready adapter for `java.math.BigDecimal`:
+
+```java
+import com.codehack.JungleConfig.Core.TypeConverterAdapter;
+import java.math.BigDecimal;
+
+public class BigDecimalAdapter implements TypeConverterAdapter {
+
+    @Override
+    public String getType() {
+        // Must equal BigDecimal.class.getSimpleName()
+        return "BigDecimal";
+    }
+
+    @Override
+    public String ConvertToSave(Object object) {
+        // BigDecimal.toPlainString() avoids scientific notation
+        return ((BigDecimal) object).toPlainString();
+    }
+
+    @Override
+    public Object CastToUse(String data) {
+        return new BigDecimal(data);
+    }
+}
+```
+
+Once registered, the adapter is used transparently:
+
+```java
+JungleConfig config = new JungleConfig(myConverterWithBigDecimal);
+
+config.Set("price", new BigDecimal("19.99"));
+BigDecimal price = config.get("price", BigDecimal.class);
+// price.equals(new BigDecimal("19.99")) → true
+```
+
+<Note>
+  `CastToUse` returns `Object`, not `T` — the `NativeTypeConverter` casts the return value to the requested type, so your adapter must return an instance of the correct class. Returning any other type results in a `ClassCastException` at the call site.
+</Note>
+
+For a complete guide on wiring a custom adapter into the full `JungleConfig` stack, see [Custom Adapters](/guides/custom-adapters).

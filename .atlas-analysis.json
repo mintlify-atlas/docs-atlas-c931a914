@@ -1,0 +1,111 @@
+{
+  "projectType": "sdk-library",
+  "projectName": "JungleConfig",
+  "projectDescription": "A lightweight, type-safe, file-based configuration library for Java that stores typed key-value data — including POJOs and collections — in a URL-safe encoded flat format, with built-in support for encryption, transactions, caching, and custom type adapters.",
+  "theme": "palm",
+  "primaryColor": "#40993e",
+  "lightColor": "#183018",
+  "darkColor": "#e4e8e4",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "installation"
+            ]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "concepts/configuration-modes",
+              "concepts/file-format",
+              "concepts/type-system",
+              "concepts/caching"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "guides/transactions",
+              "guides/encryption",
+              "guides/custom-adapters",
+              "guides/querying-and-keys",
+              "guides/backup"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "JungleConfig",
+            "pages": [
+              "api/jungleconfig",
+              "api/type-converter-adapter",
+              "api/interfaces"
+            ]
+          },
+          {
+            "group": "Built-in Adapters",
+            "pages": [
+              "api/native-adapters"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Type-safe key-value storage with automatic type tagging",
+    "File-based persistence using a compact URL-safe encoded format (JConfig001)",
+    "AES-256/GCM encrypted configuration via EncryptedConfig",
+    "In-memory configuration mode for testing or ephemeral data",
+    "FlatJson converter alternative for JSON-based storage",
+    "ACID-style transactions with BeginTransaction / Commit / Rollback",
+    "Built-in read/write cache with configurable flush thresholds",
+    "POJO serialization via Jackson (SetPOJO / get with Class<T>)",
+    "Collection support (List, Map, etc.) via TypeReference",
+    "Pluggable TypeConverterAdapter interface for custom type registration",
+    "Regex-based key querying and pattern filtering",
+    "Backup support for file-based configurations",
+    "Zero mandatory external dependencies beyond Jackson (pure Java 19)"
+  ],
+  "publicApiSurface": [
+    "JungleConfig(File file)",
+    "JungleConfig.EncryptedConfig(File file, String password)",
+    "JungleConfig.InMemoryConfig()",
+    "JungleConfig.FlatJsonConfig()",
+    "JungleConfig.Set(String key, Object data)",
+    "JungleConfig.Set(String key, Object data, String type)",
+    "JungleConfig.SetPOJO(String key, Object pojo)",
+    "JungleConfig.get(String key, Class<T> type)",
+    "JungleConfig.Get(String key, Class<T> type) → Optional<T>",
+    "JungleConfig.getCollection(String key, TypeReference<T> type)",
+    "JungleConfig.GetCollection(String key, TypeReference<T> type) → Optional<T>",
+    "JungleConfig.Remove(String key)",
+    "JungleConfig.RemoveAllKeys()",
+    "JungleConfig.Exists(String key)",
+    "JungleConfig.BeginTransaction()",
+    "JungleConfig.Commit()",
+    "JungleConfig.Rollback()",
+    "JungleConfig.EndTransaction()",
+    "JungleConfig.InvalidateCache()",
+    "JungleConfig.Backup(File path, boolean override)",
+    "JungleConfig.query(boolean iKey, String keyReg, boolean iType, String typeReg, boolean iVal, String valReg)",
+    "JungleConfig.getAllKeys()",
+    "JungleConfig.getAllKeys(String regx)",
+    "JungleConfig.getTypeSimpleName(String key)",
+    "JungleConfig.GetTypeSimpleName(String key) → Optional<String>",
+    "TypeConverterAdapter.getType()",
+    "TypeConverterAdapter.ConvertToSave(Object object)",
+    "TypeConverterAdapter.CastToUse(String data)",
+    "NativeTypeConverter(CacheInterface manager, boolean fallback, TypeConverterAdapter... adapters)",
+    "TypeMap<T,D,S> — ordered triple-entry map used for query results"
+  ]
+}

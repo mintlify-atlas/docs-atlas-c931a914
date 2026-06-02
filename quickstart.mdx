@@ -1,47 +1,203 @@
 ---
-title: "Quickstart"
-description: "Begin with a guide on the fastest path to a successful outcome"
+title: "Get Started with JungleConfig in 5 Minutes"
+sidebarTitle: "Quickstart"
+description: "Learn how to add JungleConfig to a Maven project, create a config file, and store and retrieve typed values in under five minutes."
 ---
 
-Describe how someone begins using your product. What is the first thing they need to do? Are there any prerequisites?
-
-A quickstart should take someone from zero to using your product. They'll get a quick win and a sense of what they can accomplish.
-
-## Prerequisites
-
-Before you begin, you must have:
-
-- Requirement one (for example, Node.js 18+, a free account, an API key)
-- Requirement two (for example, a compatible device, a compatible browser, a compatible operating system)
-
-## Get started
+This guide walks you through the minimum steps needed to add JungleConfig to an existing Maven project, write a handful of typed configuration values to a file, and read them back — all without any XML configuration or framework setup. By the end you will have a working config file on disk and a clear picture of the core API.
 
 <Steps>
-  <Step title="Install">
-    Describe how to install your product or sign up.
 
-    ```bash
-    npm install your-package
-    ```
-  </Step>
-  <Step title="Configure">
-    Describe any setup or configuration needed before first use.
+<Step title="Add the Maven dependency">
 
-    ```bash
-    your-cli init
-    ```
-  </Step>
-  <Step title="Run it">
-    Show the first thing a user does to see it working.
+Add JungleConfig and its three Jackson dependencies to your `pom.xml`. Jackson handles POJO serialisation and Java Time support; all three modules are required.
 
-    ```bash
-    your-cli start
-    ```
-  </Step>
-</Steps>
+```xml
+<dependencies>
+  <!-- JungleConfig -->
+  <dependency>
+    <groupId>com.codehack</groupId>
+    <artifactId>Jconfig</artifactId>
+    <version>1.0-SNAPSHOT</version>
+  </dependency>
+
+  <!-- Jackson core (required for POJO and collection support) -->
+  <dependency>
+    <groupId>com.fasterxml.jackson.core</groupId>
+    <artifactId>jackson-databind</artifactId>
+    <version>2.18.3</version>
+  </dependency>
+  <dependency>
+    <groupId>com.fasterxml.jackson.datatype</groupId>
+    <artifactId>jackson-datatype-jdk8</artifactId>
+    <version>2.18.2</version>
+  </dependency>
+  <dependency>
+    <groupId>com.fasterxml.jackson.datatype</groupId>
+    <artifactId>jackson-datatype-jsr310</artifactId>
+    <version>2.17.1</version>
+  </dependency>
+</dependencies>
+```
+
+After saving, run `mvn dependency:resolve` to confirm Maven can download the artifacts.
+
+</Step>
+
+<Step title="Create a JungleConfig instance">
+
+Point a `JungleConfig` object at a file on disk. If the file does not exist, JungleConfig creates it automatically.
+
+```java
+import com.codehack.JungleConfig.JungleConfig;
+import java.io.File;
+
+public class AppConfig {
+    public static void main(String[] args) {
+        // File-backed config — created automatically if absent
+        JungleConfig config = new JungleConfig(new File("app.conf"));
+
+        System.out.println("Config ready. Keys: " + config.getAllKeys());
+    }
+}
+```
 
 <Tip>
-  Give people a way to get help. This could be a link to a support page, a chat with a customer support agent, or a forum for your product.
-
-  Example: Need help? Reach out to us at [support@yourcompany.com](mailto:support@yourcompany.com).
+  Use `JungleConfig.InMemoryConfig()` during unit tests so no file is created on disk and the config is discarded when the JVM exits.
 </Tip>
+
+</Step>
+
+<Step title="Store primitive values">
+
+Use `Set(key, value)` to persist any of the built-in types. The method is fluent, so you can chain multiple calls. Each stored value is automatically tagged with its Java type name in the config file.
+
+```java
+config
+    .Set("app.name",    "MyService")       // String
+    .Set("app.port",    8080)              // Integer
+    .Set("app.debug",   true)              // Boolean
+    .Set("app.timeout", 30_000L)           // Long
+    .Set("app.ratio",   0.95)             // Double
+    .Set("app.version", 2.1f);            // Float
+```
+
+The resulting `app.conf` file will contain lines like:
+
+```
+JConfig001
+app.name:String=MyService
+app.port:Integer=8080
+app.debug:Boolean=true
+app.timeout:Long=30000
+app.ratio:Double=0.95
+app.version:Float=2.1
+```
+
+</Step>
+
+<Step title="Read values back">
+
+JungleConfig offers two read styles. Use the lowercase `get(key, Class)` when you are certain the key exists — it returns the value directly or `null`. Use the uppercase `Get(key, Class)` when the key may be absent — it returns an `Optional<T>`, forcing you to handle the missing case explicitly.
+
+```java
+// Direct read — returns null if the key does not exist
+String  name    = config.get("app.name",    String.class);
+int     port    = config.get("app.port",    Integer.class);
+boolean debug   = config.get("app.debug",   Boolean.class);
+long    timeout = config.get("app.timeout", Long.class);
+double  ratio   = config.get("app.ratio",   Double.class);
+
+System.out.printf("Starting %s on port %d (debug=%b)%n", name, port, debug);
+
+// Safe Optional read — use when the key might not exist yet
+config.Get("app.maxRetries", Integer.class)
+      .ifPresentOrElse(
+          r  -> System.out.println("Max retries: " + r),
+          () -> System.out.println("app.maxRetries not set, using default 3")
+      );
+```
+
+</Step>
+
+<Step title="Store and read a POJO">
+
+For structured data, use `SetPOJO(key, object)` to serialise any Java bean to the config file, then read it back with `get(key, YourClass.class)`. The POJO must have a no-argument constructor and public fields or standard getters/setters (standard Jackson rules apply).
+
+```java
+// Define a simple POJO
+public static class DatabaseSettings {
+    public String host;
+    public int    port;
+    public String name;
+
+    public DatabaseSettings() {}
+
+    public DatabaseSettings(String host, int port, String name) {
+        this.host = host;
+        this.port = port;
+        this.name = name;
+    }
+}
+
+// Store it
+DatabaseSettings db = new DatabaseSettings("localhost", 5432, "mydb");
+config.SetPOJO("db.settings", db);
+
+// Read it back
+DatabaseSettings restored = config.get("db.settings", DatabaseSettings.class);
+System.out.println("DB host: " + restored.host); // localhost
+System.out.println("DB port: " + restored.port); // 5432
+```
+
+</Step>
+
+<Step title="Store and read a collection">
+
+Generic collections need a Jackson `TypeReference` so the element type is preserved at runtime. Use `Set(key, list)` to write and `getCollection(key, typeRef)` (or `GetCollection` for the `Optional` variant) to read.
+
+```java
+import com.fasterxml.jackson.core.type.TypeReference;
+import java.util.Arrays;
+import java.util.List;
+
+// Store a list of strings
+List<String> featureFlags = Arrays.asList("dark-mode", "beta-search", "new-dashboard");
+config.Set("app.features", featureFlags);
+
+// Read it back with a TypeReference
+List<String> flags = config.getCollection(
+    "app.features",
+    new TypeReference<List<String>>() {}
+);
+flags.forEach(f -> System.out.println("Feature enabled: " + f));
+
+// Optional variant — safe when the key might not exist
+config.GetCollection("app.features", new TypeReference<List<String>>() {})
+      .ifPresent(list -> System.out.println("Total features: " + list.size()));
+```
+
+<Note>
+  Always use `getCollection` / `GetCollection` with a `TypeReference` for any generic type (`List<T>`, `Map<K,V>`, etc.). Using `get` with `List.class` discards the element type and will return a list of raw `LinkedHashMap` objects instead.
+</Note>
+
+</Step>
+
+</Steps>
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card icon="layer-group" title="Configuration modes" href="/concepts/configuration-modes">
+    Compare File, EncryptedFile, InMemory, and FlatJson modes and learn when to choose each one.
+  </Card>
+  <Card icon="arrow-right-arrow-left" title="Transactions" href="/guides/transactions">
+    Use `BeginTransaction`, `Commit`, and `Rollback` to make config updates atomic.
+  </Card>
+  <Card icon="lock" title="Encryption" href="/guides/encryption">
+    Protect sensitive values at rest with the built-in AES-encrypted file mode.
+  </Card>
+  <Card icon="code" title="API reference" href="/api/jungleconfig">
+    Full reference for every method on the `JungleConfig` class.
+  </Card>
+</CardGroup>

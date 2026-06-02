@@ -1,0 +1,84 @@
+---
+title: "Using Transactions in JungleConfig"
+sidebarTitle: "Transactions"
+description: "Group multiple writes into an atomic transaction. Use BeginTransaction, Commit, and Rollback to control when changes are flushed to disk."
+---
+
+By default, JungleConfig operates in **auto-commit mode** — every call to `Set`, `Remove`, or `RemoveAllKeys` is immediately serialized and flushed to the backing store. Transactions let you batch multiple operations together in memory and then either commit them all at once or discard them entirely, giving you full control over when data becomes durable.
+
+## Auto-commit mode (default)
+
+In auto-commit mode you simply call `Set` and the value is persisted before the next line of code runs. This is the simplest way to use JungleConfig and requires no extra setup.
+
+```java
+JungleConfig config = new JungleConfig(new File("app.conf"));
+
+config.Set("app.name", "MyService");
+config.Set("app.version", "1.0.0");
+
+String name = config.get("app.name", String.class); // "MyService"
+```
+
+## Manual transactions
+
+Calling `BeginTransaction()` switches the instance into manual mode — auto-commit is disabled and all subsequent `Set`, `Remove`, and `RemoveAllKeys` calls are queued in memory rather than written through immediately.
+
+| Method | What it does |
+|---|---|
+| `BeginTransaction()` | Disables auto-commit; starts buffering operations |
+| `Commit()` | Flushes the current buffer to the backing store; transaction stays open |
+| `Rollback()` | Discards the buffer; nothing is written |
+| `EndTransaction()` | Re-enables auto-commit and immediately flushes any remaining pending saves |
+
+```java
+JungleConfig config = JungleConfig.InMemoryConfig();
+
+config.BeginTransaction();
+config.Set("user.name", "Alice");
+config.Set("user.role", "admin");
+config.Set("user.active", true);
+config.Commit(); // writes all three atomically
+
+String name = config.get("user.name", String.class); // "Alice"
+```
+
+## Rollback example
+
+If something goes wrong before you commit, call `Rollback()` to throw away every queued operation. None of the pending writes ever reach the backing store.
+
+```java
+config.BeginTransaction();
+config.Set("feature.flag", "enabled");
+config.Rollback(); // discard — feature.flag is never written
+
+boolean exists = config.Exists("feature.flag"); // false
+```
+
+## BeginTransaction vs EndTransaction
+
+`EndTransaction()` does two things at once: it re-enables auto-commit **and** immediately flushes any saves that are still pending in the buffer. Use it when you want to close out the transaction and return to normal auto-commit behaviour in one step.
+
+`Commit()`, by contrast, only flushes the current buffer — the transaction remains open and auto-commit stays off. You can call `Commit()` multiple times within a single transaction to checkpoint intermediate batches without ending the transaction:
+
+```java
+config.BeginTransaction();
+
+// First batch
+config.Set("batch.a", "1");
+config.Set("batch.b", "2");
+config.Commit(); // flush batch 1 — transaction still active
+
+// Second batch
+config.Set("batch.c", "3");
+config.Commit(); // flush batch 2 — transaction still active
+
+config.EndTransaction(); // re-enable auto-commit and flush anything left
+```
+
+<Note>
+  Pending transaction state is held in `NativeInternalTransaction.saveQuery` (entries to write) and `remList` (keys to delete). Calling `Rollback()` clears both lists in-place without touching the underlying file or cache, so the on-disk state remains unchanged.
+</Note>
+
+<Warning>
+  Transactions are not thread-safe. If multiple threads share a single `JungleConfig` instance, you must use external synchronization (for example, `synchronized` blocks or a `ReentrantLock`) to serialize access around `BeginTransaction`/`Commit`/`Rollback` call sequences.
+</Warning>

@@ -1,0 +1,111 @@
+---
+title: "How JungleConfig's Type System Works"
+sidebarTitle: "Type System"
+description: "JungleConfig uses a three-layer type system: built-in adapters for primitive and Java time types, Jackson for POJOs and collections, and a pluggable adapter interface for custom types."
+---
+
+JungleConfig resolves how to serialize and deserialize each value through a three-layer type system managed by `NativeTypeConverter`. The first layer is a registry of built-in `TypeConverterAdapter` implementations that handle common Java primitives and `java.time` types. The second layer is a Jackson fallback that handles POJOs, collections, and any type not covered by the registry. The third layer is the pluggable adapter interface itself, which allows you to register custom converters for your own types at construction time.
+
+## Built-in Types
+
+JungleConfig ships with ten built-in adapters registered automatically by `JungleConfig.getDefaultAdapters()`. Each adapter implements the `TypeConverterAdapter` interface, which declares three methods: `getType()` returns the simple class name used as the type tag in the config file, `ConvertToSave(Object)` converts a value to its string representation, and `CastToUse(String)` parses that string back to the correct Java type.
+
+| Type tag | Java class | `getType()` return |
+|----------|------------|--------------------|
+| `Boolean` | `java.lang.Boolean` | `"Boolean"` |
+| `Integer` | `java.lang.Integer` | `"Integer"` |
+| `String` | `java.lang.String` | `"String"` |
+| `Long` | `java.lang.Long` | `"Long"` |
+| `Double` | `java.lang.Double` | `"Double"` |
+| `Float` | `java.lang.Float` | `"Float"` |
+| `UUID` | `java.util.UUID` | `"UUID"` |
+| `LocalDate` | `java.time.LocalDate` | `"LocalDate"` |
+| `LocalDateTime` | `java.time.LocalDateTime` | `"LocalDateTime"` |
+| `LocalTime` | `java.time.LocalTime` | `"LocalTime"` |
+
+Reading and writing these types requires no extra configuration:
+
+```java
+JungleConfig config = new JungleConfig(new File("app.conf"));
+
+config.Set("app.port", 8080);               // stored as Integer
+config.Set("app.debug", true);              // stored as Boolean
+config.Set("launch.date", LocalDate.now()); // stored as LocalDate
+
+int port      = config.get("app.port", Integer.class);
+boolean debug = config.get("app.debug", Boolean.class);
+LocalDate d   = config.get("launch.date", LocalDate.class);
+```
+
+## POJO and Collection Types
+
+When a value's class simple name is not found in the adapter registry, `NativeTypeConverter` falls back to Jackson serialization — provided `FALLBACK_TO_SERIALIZE` is `true` (the default in all four built-in factory methods).
+
+For POJOs, use `SetPOJO` to make the intent explicit. The type tag written to the file will be `Json` and the value will be the Jackson-serialized JSON string, URL-encoded:
+
+```java
+public class ServerConfig {
+    public String host;
+    public int port;
+}
+
+ServerConfig cfg = new ServerConfig();
+cfg.host = "localhost";
+cfg.port = 9090;
+
+config.SetPOJO("server", cfg);
+
+// Read back as a POJO
+ServerConfig loaded = config.get("server", ServerConfig.class);
+```
+
+For generic collections such as `List<String>` or `Map<String, Integer>`, use `getCollection` with a Jackson `TypeReference` to preserve generic type information at runtime:
+
+```java
+import com.fasterxml.jackson.core.type.TypeReference;
+
+config.Set("tags", List.of("alpha", "beta", "gamma"));
+
+List<String> tags = config.getCollection("tags", new TypeReference<List<String>>() {});
+```
+
+Both `get` and `getCollection` have `Optional`-returning counterparts — `Get` and `GetCollection` — that return `Optional.empty()` instead of `null` when a key does not exist.
+
+## Type Resolution Order
+
+`NativeTypeConverter` determines how to serialize a value through the following steps, in order:
+
+1. **Explicit type hint** — if you call `Set(key, data, type)` with a non-blank type string, that type string is used directly. Passing `"Json"` forces Jackson serialization regardless of whether a built-in adapter exists for the class.
+2. **Class simple name lookup** — if no explicit type is provided, the type string is derived from `dataObj.getClass().getSimpleName()` and looked up in the adapter registry.
+3. **Jackson fallback** — if the class simple name is not in the registry and `FALLBACK_TO_SERIALIZE` is `true`, Jackson serializes the object to JSON and the type tag is set to `"Json"`.
+4. **Exception** — if the class is not in the registry and `FALLBACK_TO_SERIALIZE` is `false`, an `InvalidConfigFormatException` is thrown.
+
+On read, the stored type tag drives deserialization: if the tag is `Json` or the requested class is not in the adapter registry, Jackson's `ConvertToObject` is called; otherwise the matching `TypeConverterAdapter.CastToUse` handles it.
+
+## Null Values
+
+Setting a key to `null` is fully supported. Internally, `NativeTypeConverter` detects a `null` data object before consulting the adapter registry and records the type tag as `"null"` with the value string `"null"`:
+
+```java
+config.Set("optional.feature", null);
+
+String val = config.get("optional.feature", String.class); // returns null
+```
+
+## Custom Adapters
+
+The `TypeConverterAdapter` interface is intentionally minimal:
+
+```java
+public interface TypeConverterAdapter {
+    String getType();                       // simple name used as the type tag
+    String ConvertToSave(Object object);    // object → String for storage
+    Object CastToUse(String data);          // String → Object on read
+}
+```
+
+You can pass additional adapters to the `NativeTypeConverter` constructor alongside the defaults. The adapter's `getType()` return value is the key used for registry lookup, so it must match the class simple name of the values you intend to store with that adapter.
+
+<Tip>
+Call `config.getTypeSimpleName(key)` to inspect the type tag stored for any key at runtime. This is useful for debugging serialization issues or for writing generic utilities that need to branch on the stored type without reading the value itself. The `Optional`-returning variant `GetTypeSimpleName(key)` is also available.
+</Tip>

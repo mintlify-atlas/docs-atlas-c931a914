@@ -1,20 +1,84 @@
 ---
-title: "Introduction"
-description: "Welcome to your project"
+title: "JungleConfig: Type-Safe Configuration Library for Java"
+sidebarTitle: "Home"
+description: "JungleConfig is a lightweight, file-based Java configuration library with type-safe key-value storage, encrypted configs, transactions, and pluggable adapters."
 ---
 
-Write a short description of your product here. What it does, who it's for, and what they can accomplish with it.
+JungleConfig is a zero-friction Java library for storing and loading typed configuration data. It saves key-value pairs — including POJOs, collections, and Java time types — in a compact URL-safe encoded file format, with no external infrastructure required. Pick from file-based, encrypted, in-memory, or flat JSON storage modes and be up and running in minutes.
 
-<Tip>
-  Ready to make this your own? Start by editing this page. Update your `docs.json` file to customize your site. Then fill out the [Quickstart](/quickstart) page.
-</Tip>
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="bolt" href="/quickstart">
+    Get JungleConfig running in your project in under five minutes.
+  </Card>
+  <Card title="Configuration Modes" icon="sliders" href="/concepts/configuration-modes">
+    Choose between file, encrypted, in-memory, and flat JSON backends.
+  </Card>
+  <Card title="Transactions" icon="rotate-left" href="/guides/transactions">
+    Batch writes with commit and rollback support.
+  </Card>
+  <Card title="API Reference" icon="code" href="/api/jungleconfig">
+    Full reference for every method on the JungleConfig class.
+  </Card>
+</CardGroup>
 
-<Card title="Quickstart" icon="rocket" href="/quickstart">
-  This card links to the quickstart page in your project.
-</Card>
-<Card title="Components" icon="puzzle-piece" href="https://mintlify.com/docs/components">
-  Add cards, callouts, steps, tabs, and more to design and structure your pages.
-</Card>
-<Card title="Settings" icon="gear" href="https://mintlify.com/docs/organize/settings">
-  Set your site name, branding, and navigation in the `docs.json` file.
-</Card>
+## Why JungleConfig?
+
+Most Java config libraries require a schema file, a framework, or a heavyweight dependency chain. JungleConfig is different — it stores data as a single flat file, tags every entry with its Java type, and hands the value back cast-ready when you read it. There is no reflection magic, no annotation processing, and no XML.
+
+<CardGroup cols={3}>
+  <Card title="Type-Safe" icon="shield-check">
+    Every key is stored with its type name. Reads return the correct Java type automatically.
+  </Card>
+  <Card title="Transactional" icon="database">
+    Group writes into atomic transactions. Roll back any pending changes before they reach disk.
+  </Card>
+  <Card title="Pluggable" icon="puzzle-piece">
+    Register custom `TypeConverterAdapter` implementations to handle any type your project uses.
+  </Card>
+  <Card title="Encrypted" icon="lock">
+    One factory call switches to AES-256/GCM encryption backed by PBKDF2 key derivation.
+  </Card>
+  <Card title="POJO & Collections" icon="layer-group">
+    Store arbitrary objects and generic collections via Jackson serialization with zero boilerplate.
+  </Card>
+  <Card title="In-Memory Mode" icon="memory">
+    Use `InMemoryConfig()` in tests for a fully functional config instance with no file I/O.
+  </Card>
+</CardGroup>
+
+## Get Started
+
+<Steps>
+  <Step title="Add the dependency">
+    Add JungleConfig to your Maven project alongside Jackson.
+    ```xml pom.xml
+    <dependency>
+      <groupId>com.codehack</groupId>
+      <artifactId>Jconfig</artifactId>
+      <version>1.0-SNAPSHOT</version>
+    </dependency>
+    ```
+  </Step>
+  <Step title="Create a config instance">
+    Point JungleConfig at a file. The file is created automatically if it does not exist.
+    ```java
+    import com.codehack.JungleConfig.JungleConfig;
+    import java.io.File;
+
+    JungleConfig config = new JungleConfig(new File("app.conf"));
+    ```
+  </Step>
+  <Step title="Write and read values">
+    Store any Java type and retrieve it with a single generic call.
+    ```java
+    config.Set("app.name", "MyApp");
+    config.Set("app.port", 8080);
+
+    String name = config.get("app.name", String.class);
+    int port    = config.get("app.port", Integer.class);
+    ```
+  </Step>
+  <Step title="Explore advanced features">
+    Dive into encryption, transactions, custom adapters, and querying in the guides.
+  </Step>
+</Steps>

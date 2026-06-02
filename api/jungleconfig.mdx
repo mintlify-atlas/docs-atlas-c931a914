@@ -1,0 +1,430 @@
+---
+title: "JungleConfig Class API Reference"
+sidebarTitle: "JungleConfig"
+description: "Complete method reference for the JungleConfig class: constructors, factory methods, read/write operations, transactions, cache, backup, and key queries."
+---
+
+`JungleConfig` is the primary entry point for the JungleConfig library. It wraps a fully assembled `TypeConverter` stack and exposes a clean, chainable API for reading, writing, and managing typed configuration entries backed by a file, encrypted file, or in-memory store. Every convenience constructor pre-wires a `NativeConverter`, `NativeInternalCache`, `NativeInternalTransaction`, `NativeExtendedCache`, and `NativeTypeConverter` with all ten default type adapters so you can start persisting configuration values without any additional setup.
+
+**Package:** `com.codehack.JungleConfig`
+
+---
+
+## Constructors & Factory Methods
+
+### `JungleConfig(File file)`
+
+Creates a fully wired, file-backed configuration instance. The internal stack is assembled as follows:
+
+- **IO layer** — `NativeIOHandler` reading and writing `file`
+- **Converter layer** — `NativeConverter` (custom key-value format, URL-encoded values)
+- **Internal cache** — `NativeInternalCache` with a write margin of `10` and a read margin of `100`, flush-on-write enabled
+- **Transaction layer** — `NativeInternalTransaction`
+- **Extended cache** — `NativeExtendedCache`
+- **Type converter** — `NativeTypeConverter` with Jackson fallback enabled and all 10 default adapters registered
+
+```java
+JungleConfig config = new JungleConfig(new File("app.conf"));
+```
+
+<ParamField path="file" type="java.io.File" required>
+  The file to use as the configuration store. Created automatically if it does not exist.
+</ParamField>
+
+---
+
+### `JungleConfig(TypeConverter converter)`
+
+Low-level constructor for assembling a custom stack. Pass any implementation of `TypeConverter` — useful when you need a non-standard converter chain, a custom `IOHandlerInterface`, or a different caching strategy.
+
+```java
+TypeConverter custom = new NativeTypeConverter(myCache, false, myAdapter);
+JungleConfig config = new JungleConfig(custom);
+```
+
+<ParamField path="converter" type="com.codehack.JungleConfig.Core.TypeConverter" required>
+  A fully assembled `TypeConverter` implementation that will handle all read, write, and transaction operations.
+</ParamField>
+
+---
+
+### `static JungleConfig EncryptedConfig(File file, String password)`
+
+Factory method that builds the same full stack as the `File` constructor but replaces `NativeConverter` with `NativeEncryptedConverter`, which encrypts the configuration file contents using the supplied password. All other layers — caching, transactions, type adapters — are identical to the default stack.
+
+```java
+JungleConfig config = JungleConfig.EncryptedConfig(new File("app.conf"), "s3cr3t");
+```
+
+<ParamField path="file" type="java.io.File" required>
+  The file to use as the encrypted configuration store.
+</ParamField>
+
+<ParamField path="password" type="String" required>
+  The encryption password. Must be the same value on every subsequent read.
+</ParamField>
+
+---
+
+### `static JungleConfig InMemoryConfig()`
+
+Factory method that creates a configuration instance backed entirely by memory using `NativeInMemoryIOHandler`. No file is created or read. Data is lost when the JVM exits. Useful for tests, ephemeral configuration, and unit-testing application logic that depends on `JungleConfig`.
+
+```java
+JungleConfig config = JungleConfig.InMemoryConfig();
+```
+
+---
+
+### `static JungleConfig FlatJsonConfig()`
+
+Factory method that uses `NativeFlatJsonConverter` together with `NativeInMemoryIOHandler`. Configuration entries are encoded as flat JSON rather than the native key-value format. Data is stored in memory only.
+
+```java
+JungleConfig config = JungleConfig.FlatJsonConfig();
+```
+
+---
+
+## Write Methods
+
+### `Set(String key, Object data) → JungleConfig`
+
+Stores a value under the given key. The type tag is determined automatically by calling `data.getClass().getSimpleName()` and looking up a matching `TypeConverterAdapter`. If no adapter is found and Jackson fallback is enabled (the default), the value is serialized to JSON and stored with the tag `"Json"`. Returns `this` to allow method chaining.
+
+```java
+config.Set("app.name", "Demo")
+      .Set("app.port", 9090)
+      .Set("app.debug", false);
+```
+
+<ParamField path="key" type="String" required>
+  The configuration key under which the value is stored. Keys are arbitrary strings; dots are a conventional but not enforced namespace separator.
+</ParamField>
+
+<ParamField path="data" type="Object" required>
+  The value to store. Must not be `null` when relying on automatic type detection. Any type with a registered adapter or any Jackson-serializable POJO is accepted.
+</ParamField>
+
+---
+
+### `Set(String key, Object data, String type) → JungleConfig`
+
+Stores a value with an explicit type hint. The `type` string must exactly match either an adapter's `getType()` return value (e.g. `"Integer"`, `"UUID"`) or the literal `"Json"` to force Jackson serialization. Use this overload when the runtime class of `data` differs from the target adapter name, or when you want to guarantee a specific serialization path.
+
+```java
+config.Set("app.timeout", 30L, "Long");
+config.Set("config.raw", myObj, "Json");
+```
+
+<ParamField path="key" type="String" required>
+  The configuration key.
+</ParamField>
+
+<ParamField path="data" type="Object" required>
+  The value to store.
+</ParamField>
+
+<ParamField path="type" type="String" required>
+  The type tag. Must match an adapter's `getType()` value or `"Json"`.
+</ParamField>
+
+---
+
+### `SetPOJO(String key, Object pojo) → JungleConfig`
+
+Forces Jackson serialization regardless of whether a native adapter exists for the object's type. The value is always stored with the tag `"Json"`. Use this method when storing complex objects, generic containers, or any type where you want Jackson's full serialization capabilities rather than a custom adapter.
+
+```java
+config.SetPOJO("server.config", new ServerConfig("localhost", 8080));
+```
+
+<ParamField path="key" type="String" required>
+  The configuration key.
+</ParamField>
+
+<ParamField path="pojo" type="Object" required>
+  Any Jackson-serializable object. The object's class must be visible to the default Jackson `ObjectMapper`.
+</ParamField>
+
+---
+
+## Read Methods
+
+### `get(String key, Class<T> type) → T`
+
+Returns the value stored under `key`, deserialized to `type`. Returns `null` if the key does not exist. This is the low-level, null-returning variant — prefer `Get` when you want to avoid null checks.
+
+```java
+String name = config.get("app.name", String.class);
+Integer port = config.get("app.port", Integer.class); // null if missing
+```
+
+<ParamField path="key" type="String" required>
+  The configuration key to look up.
+</ParamField>
+
+<ParamField path="type" type="Class<T>" required>
+  The target Java type. Must match the type with which the value was stored, or be a Jackson-compatible target for JSON-tagged entries.
+</ParamField>
+
+---
+
+### `Get(String key, Class<T> type) → Optional<T>`
+
+Safe variant of `get`. Returns `Optional.empty()` when the key does not exist, instead of `null`. Prefer this method in application code where missing keys are a normal condition rather than an error.
+
+```java
+Optional<Integer> port = config.Get("app.port", Integer.class);
+port.ifPresent(p -> System.out.println("Port: " + p));
+```
+
+<ParamField path="key" type="String" required>
+  The configuration key to look up.
+</ParamField>
+
+<ParamField path="type" type="Class<T>" required>
+  The target Java type.
+</ParamField>
+
+---
+
+### `getCollection(String key, TypeReference<T> type) → T`
+
+Reads a value into a generic collection type such as `List<String>` or `Map<String, Integer>`. Because Java erases generic type parameters at runtime, `Class<T>` is insufficient for these cases; pass a Jackson `TypeReference` instead. Returns `null` if the key does not exist.
+
+```java
+List<String> tags = config.getCollection("app.tags", new TypeReference<List<String>>() {});
+```
+
+<ParamField path="key" type="String" required>
+  The configuration key to look up.
+</ParamField>
+
+<ParamField path="type" type="com.fasterxml.jackson.core.type.TypeReference<T>" required>
+  A Jackson `TypeReference` capturing the full generic type, including type parameters.
+</ParamField>
+
+---
+
+### `GetCollection(String key, TypeReference<T> type) → Optional<T>`
+
+Optional-returning variant of `getCollection`. Returns `Optional.empty()` when the key does not exist.
+
+```java
+Optional<List<String>> tags = config.GetCollection("app.tags", new TypeReference<List<String>>() {});
+```
+
+<ParamField path="key" type="String" required>
+  The configuration key to look up.
+</ParamField>
+
+<ParamField path="type" type="com.fasterxml.jackson.core.type.TypeReference<T>" required>
+  A Jackson `TypeReference` capturing the full generic type.
+</ParamField>
+
+---
+
+## Transaction Methods
+
+JungleConfig supports explicit transactions that batch multiple writes and defer disk persistence until `Commit()` or `EndTransaction()` is called. Transactions are managed at the `NativeInternalTransaction` layer.
+
+### `BeginTransaction() → JungleConfig`
+
+Suspends auto-commit so that subsequent `Set`, `Remove`, and `RemoveAllKeys` calls are buffered in memory and not written to disk. Returns `this` for chaining.
+
+```java
+config.BeginTransaction()
+      .Set("db.host", "localhost")
+      .Set("db.port", 5432)
+      .Commit();
+```
+
+---
+
+### `Commit() → JungleConfig`
+
+Flushes all pending writes accumulated since the last `BeginTransaction()` or `Commit()` to the underlying store. Does not re-enable auto-commit — call `EndTransaction()` for that. Returns `this`.
+
+---
+
+### `Rollback() → JungleConfig`
+
+Discards all pending writes accumulated since the last `BeginTransaction()` or `Commit()`. The configuration store is left unchanged. Returns `this`.
+
+---
+
+### `EndTransaction()`
+
+Flushes any remaining pending writes and re-enables auto-commit. After this call, every `Set` or `Remove` is immediately persisted.
+
+---
+
+## Key Operations
+
+### `Remove(String key) → boolean`
+
+Removes the entry with the given key. Returns `true` if the key existed and was removed, `false` if the key was not present.
+
+<ParamField path="key" type="String" required>
+  The key to remove.
+</ParamField>
+
+---
+
+### `RemoveAllKeys()`
+
+Clears every entry in the configuration store. Equivalent to calling `Remove` on every key returned by `getAllKeys()`, but implemented as a single atomic clear operation at the cache layer.
+
+---
+
+### `Exists(String key) → boolean`
+
+Returns `true` if the given key is present in the configuration store.
+
+<ParamField path="key" type="String" required>
+  The key to test.
+</ParamField>
+
+---
+
+### `getAllKeys() → List<String>`
+
+Returns an unordered list of every key currently stored in the configuration.
+
+---
+
+### `getAllKeys(String regx) → List<String>`
+
+Returns the subset of keys whose full string matches the supplied Java regular expression. The regex is applied as a full-match (equivalent to `String.matches(regx)`), not a substring search.
+
+```java
+List<String> dbKeys = config.getAllKeys("db\\..+");
+```
+
+<ParamField path="regx" type="String" required>
+  A Java regular expression. Only keys whose entire string matches are included.
+</ParamField>
+
+---
+
+### `getTypeSimpleName(String key) → String`
+
+Returns the type tag stored alongside the value for the given key (e.g. `"String"`, `"Integer"`, `"Json"`). Returns `null` if the key does not exist.
+
+<ParamField path="key" type="String" required>
+  The key whose type tag to retrieve.
+</ParamField>
+
+---
+
+### `GetTypeSimpleName(String key) → Optional<String>`
+
+Optional-returning variant of `getTypeSimpleName`.
+
+<ParamField path="key" type="String" required>
+  The key whose type tag to retrieve.
+</ParamField>
+
+---
+
+## Cache & Backup
+
+### `InvalidateCache()`
+
+Marks the internal cache as dirty. The next read operation will reload data from the underlying `ConverterInterface` (i.e., from disk or the in-memory store), discarding any cached state. Use this when the backing file may have been modified externally.
+
+---
+
+### `Backup(File path, boolean override) → boolean`
+
+Copies the current configuration store to `path`. Returns `true` if the backup succeeded.
+
+<ParamField path="path" type="java.io.File" required>
+  Destination file for the backup copy.
+</ParamField>
+
+<ParamField path="override" type="boolean" required>
+  When `true`, an existing file at `path` is overwritten. When `false`, the backup is aborted and `false` is returned if the destination already exists.
+</ParamField>
+
+---
+
+## Query
+
+### `query(boolean iKey, String keyReg, boolean iType, String typeReg, boolean iVal, String valReg) → TypeMap<String, String, String>`
+
+Performs a regex-filtered scan over all entries in the configuration store. Each stored entry is represented as a triple of `(key, typeName, encodedValue)`. The method applies three independent regex filters — one for each field — and returns only entries that satisfy all three. Each filter can be inverted with its corresponding `i*` flag.
+
+```java
+// Find all entries whose key starts with "db." and whose type is "String"
+TypeMap<String, String, String> result =
+    config.query(false, "db\\..+", false, "String", false, ".+");
+
+for (TypeMap.Entry<String, String, String> entry : result.getEntryList()) {
+    System.out.printf("Key: %s, Type: %s, Value: %s%n",
+        entry.getKey(), entry.getValue1(), entry.getValue2());
+}
+```
+
+<ParamField path="iKey" type="boolean" required>
+  When `true`, inverts the key regex: only entries whose key does **not** match `keyReg` are included.
+</ParamField>
+
+<ParamField path="keyReg" type="String" required>
+  Java regular expression applied against each entry's key string.
+</ParamField>
+
+<ParamField path="iType" type="boolean" required>
+  When `true`, inverts the type regex: only entries whose type tag does **not** match `typeReg` are included.
+</ParamField>
+
+<ParamField path="typeReg" type="String" required>
+  Java regular expression applied against each entry's type tag (e.g. `"String"`, `"Integer"`, `"Json"`).
+</ParamField>
+
+<ParamField path="iVal" type="boolean" required>
+  When `true`, inverts the value regex: only entries whose stored value does **not** match `valReg` are included.
+</ParamField>
+
+<ParamField path="valReg" type="String" required>
+  Java regular expression applied against each entry's encoded (string) value as it is stored internally.
+</ParamField>
+
+The method returns a `TypeMap<String, String, String>` where each `Entry` provides:
+- `getKey()` — the configuration key
+- `getValue1()` — the type simple name tag
+- `getValue2()` — the encoded value string
+
+Pass `".+"` for any regex and `false` for its invert flag to match all entries for that field.
+
+---
+
+## Complete Example
+
+```java
+JungleConfig config = new JungleConfig(new File("app.conf"));
+
+// Chained writes
+config.Set("app.name", "Demo")
+      .Set("app.port", 9090)
+      .Set("app.debug", false);
+
+// Null-returning read
+String name = config.get("app.name", String.class);
+
+// Optional read
+Optional<Integer> port = config.Get("app.port", Integer.class);
+
+// Transactional batch write
+config.BeginTransaction()
+      .Set("db.host", "localhost")
+      .Set("db.port", 5432)
+      .Commit()
+      .EndTransaction();
+
+// Key inspection
+System.out.println(config.Exists("app.name"));         // true
+System.out.println(config.getTypeSimpleName("app.port")); // "Integer"
+System.out.println(config.getAllKeys("app\\..+"));     // [app.name, app.port, app.debug]
+```

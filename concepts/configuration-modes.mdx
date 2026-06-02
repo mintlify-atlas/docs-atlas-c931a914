@@ -1,0 +1,54 @@
+---
+title: "Configuration Modes in JungleConfig"
+sidebarTitle: "Config Modes"
+description: "JungleConfig supports four storage backends: file-based, AES-256 encrypted, in-memory, and flat JSON. Learn when to use each mode."
+---
+
+JungleConfig's storage backend is chosen at construction time through four factory methods and constructors on the `JungleConfig` class. All four modes expose exactly the same public API — the only difference is where and how entries are persisted. Picking the right mode lets you balance security, durability, and convenience without changing any application code.
+
+<Tabs>
+  <Tab title="File">
+    ```java
+    JungleConfig config = new JungleConfig(new File("app.conf"));
+    ```
+
+    File mode is the standard choice for production applications. Data is stored on disk in the human-readable [JConfig001 format](/concepts/file-format), where each entry is a `key:TypeName=URLencodedValue` line. The file is created automatically on the first write. Because the format is plain text, you can inspect and edit it with any text editor, track it in version control, or diff it between deployments.
+  </Tab>
+
+  <Tab title="Encrypted">
+    ```java
+    JungleConfig config = JungleConfig.EncryptedConfig(new File("app.conf"), "password");
+    ```
+
+    Encrypted mode wraps the standard JConfig001 format with AES-256/GCM encryption. The key is derived from the supplied password using PBKDF2WithHmacSHA256 (100,000 iterations), and the on-disk representation is a single Base64 string containing a 16-byte salt, a 12-byte IV, and the AES/GCM ciphertext. Use this mode for any config file that contains credentials, API keys, or other secrets that must not be readable at rest.
+  </Tab>
+
+  <Tab title="InMemory">
+    ```java
+    JungleConfig config = JungleConfig.InMemoryConfig();
+    ```
+
+    In-memory mode uses a `NativeInMemoryIOHandler` as its backing store, so no data ever touches the file system. All entries are lost when the process exits. This mode is ideal for unit tests, integration tests, and short-lived CLI tools where you want the full JungleConfig API without any I/O side effects.
+  </Tab>
+
+  <Tab title="FlatJson">
+    ```java
+    JungleConfig config = JungleConfig.FlatJsonConfig();
+    ```
+
+    Flat JSON mode replaces the line-oriented JConfig001 encoding with a Jackson-serialized JSON document stored in memory (also backed by `NativeInMemoryIOHandler`). The entire `TypeMap` is serialized as a JSON object on every write and deserialized on every read. This is useful when you want a structured, JSON-native in-process config store, or when you need to inspect the internal state with a JSON viewer during debugging.
+  </Tab>
+</Tabs>
+
+## Mode Comparison
+
+| Mode | Persistent | Encrypted | Human-readable | Best use case |
+|------|-----------|-----------|----------------|---------------|
+| File | ✅ Yes | ❌ No | ✅ Yes | Production app config |
+| Encrypted | ✅ Yes | ✅ Yes (AES-256/GCM) | ❌ No | Secrets & credentials |
+| InMemory | ❌ No | ❌ No | N/A | Tests & ephemeral config |
+| FlatJson | ❌ No | ❌ No | ✅ Yes (JSON) | Debugging & structured in-process config |
+
+<Note>
+All four modes share an identical `JungleConfig` API. Methods like `Set`, `get`, `Get`, `BeginTransaction`, `Commit`, `Rollback`, `InvalidateCache`, and `Backup` behave the same regardless of which mode is active. You can swap modes by changing a single line of construction code without touching any other part of your application.
+</Note>
